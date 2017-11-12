@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug)]
 pub enum PacketType {
     C1(C1Packet),
@@ -55,6 +57,19 @@ impl C1Packet {
     }
 }
 
+impl fmt::Display for C1Packet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "C2")?;
+        for b in &self.data {
+            write!(f, "{:X}", b)?;
+        }
+        Ok(())
+    }
+}
+
+
+
+
 #[derive(Debug)]
 pub struct C2Packet {
     sz: u16,
@@ -95,5 +110,15 @@ impl C2Packet {
         buf[4..].clone_from_slice(&self.data);
 
         Ok(self.len())
+    }
+}
+
+impl fmt::Display for C2Packet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "C2")?;
+        for b in &self.data {
+            write!(f, "{:X}", b)?;
+        }
+        Ok(())
     }
 }
