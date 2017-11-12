@@ -4,51 +4,11 @@ use std::net::TcpStream;
 use std::thread;
 
 #[derive(Debug)]
-pub enum SessionEventType {
-    Connected,
-    Disconnected,
-    Data,
+pub enum SessionEvent {
+    Connected(Session),
+    Disconnected(u32),
+    Data(Vec<u8>),
 }
-
-#[derive(Debug)]
-pub struct SessionEvent {
-    pub kind: SessionEventType,
-    pub data: Vec<u8>,
-}
-
-impl SessionEvent {
-    pub fn connected(id: u32) -> SessionEvent {
-        SessionEvent {
-            kind: SessionEventType::Connected,
-            data: vec![
-                ((id >> 24) & 0xFF) as u8,
-                ((id >> 16) & 0xFF) as u8,
-                ((id >> 8) & 0xFF) as u8,
-                (id & 0xFF) as u8,
-            ],
-        }
-    }
-
-    pub fn disconnect(id: u32) -> SessionEvent {
-        SessionEvent {
-            kind: SessionEventType::Disconnected,
-            data: vec![
-                ((id >> 24) & 0xFF) as u8,
-                ((id >> 16) & 0xFF) as u8,
-                ((id >> 8) & 0xFF) as u8,
-                (id & 0xFF) as u8,
-            ],
-        }
-    }
-
-    pub fn data(data: &[u8]) -> SessionEvent {
-        SessionEvent {
-            kind: SessionEventType::Data,
-            data: data.to_vec(),
-        }
-    }
-}
-
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -59,8 +19,10 @@ pub enum SessionError {
     C1ErrorEosReached,
     StreamCopyFailure,
     ThreadCreationFailure,
+    StreamWriteFailure,
 }
 
+#[derive(Debug)]
 pub struct Session {
     pub id: u32,
     stream: TcpStream,
@@ -117,7 +79,7 @@ impl Session {
     }
 
     fn close_client(srv_tx: &mut Sender<SessionEvent>, id: u32) {
-        match srv_tx.send(SessionEvent::disconnect(id)) {
+        match srv_tx.send(SessionEvent::Disconnected(id)) {
             Err(why) => panic!("{:?}", why),
             _ => (),
         }
@@ -168,11 +130,11 @@ impl Session {
                     }
                     Ok(cnt) => {
                         println!("{:?} bytes was read.", cnt);
-                        match tx.send(SessionEvent::data(&packet_buf)) {
+                        match tx.send(SessionEvent::Data(packet_buf[0..cnt].to_vec())) {
                             Err(why) => {
                                 println!("Failed to send SessionEvent: {:?}", why);
                                 break;
-                            },
+                            }
                             _ => (),
                         }
                     }
@@ -183,48 +145,44 @@ impl Session {
         Session::close_client(&mut tx, id);
     }
 
-    pub fn new(id: u32, mut stream: TcpStream, srv_tx: Sender<SessionEvent>) -> Result<Session, SessionError> {
+    pub fn new(
+        id: u32,
+        stream: TcpStream,
+        srv_tx: Sender<SessionEvent>,
+    ) -> Result<Session, SessionError> {
         let rx_stream = match stream.try_clone() {
             Err(why) => {
                 println!("Failed to clone stream: {:?}", why);
                 return Err(SessionError::StreamCopyFailure);
             }
-            Ok(stream) => stream
+            Ok(stream) => stream,
         };
 
         let rx_handler = match thread::Builder::new()
             .name(format!("Session {} RX", id))
-            .spawn(move || Session::main_loop(srv_tx, rx_stream, id)) {
-                Err(why) => {
-                    println!("Failed to create session loop thread: {:?}", why);
-                    return Err(SessionError::ThreadCreationFailure);
-                }
-                Ok(handler) => handler
-            };
-
-        //Test only, remove later.
-        let welcome = [0xC1, 0x04, 0x00, 0x01];
-        stream.write(&welcome).unwrap();
-
-        let srv_list = [
-            0xC2,
-            0x00,
-            0x0B,
-            0xF4,
-            0x06,
-            0x00,
-            0x01,
-            0x00,
-            0x00,
-            0x00,
-            0x77,
-        ];
-        stream.write(&srv_list).unwrap();
+            .spawn(move || Session::main_loop(srv_tx, rx_stream, id))
+        {
+            Err(why) => {
+                println!("Failed to create session loop thread: {:?}", why);
+                return Err(SessionError::ThreadCreationFailure);
+            }
+            Ok(handler) => handler,
+        };
 
         Ok(Session {
             id: id,
             stream: stream,
             rx_handler: rx_handler,
         })
+    }
+
+    pub fn send(&mut self, buf: &[u8]) -> Result<(), SessionError> {
+        match self.stream.write(buf) {
+            Err(why) => {
+                println!("Failed to write on stream: {:?}", why);
+                Err(SessionError::StreamWriteFailure)
+            }
+            Ok(_) => Ok(()),
+        }
     }
 }
