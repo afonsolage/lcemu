@@ -26,32 +26,57 @@ pub enum Event {
 
 pub enum Error {
     EventTxFailure,
+    EventTxNone,
+    SendPacketSerializeFailed,
 }
 
 pub struct Server {
     evt_tx: Sender<Event>,
     evt_rx: Receiver<Event>,
+    net_tx: Option<Sender<NetEvent>>,
 }
-
 
 impl<'a> Server {
     pub fn new() -> Server {
         let (tx, rx): (Sender<Event>, Receiver<Event>) = mpsc::channel();
         Server {
+            net_tx: None,
             evt_tx: tx,
             evt_rx: rx,
         }
     }
 
-    // pub fn send_event(&mut self, evt: NetEvent) -> Result<(), Error> {
-    //     match self.session_evt_tx.send(evt) {
-    //         Err(why) => {
-    //             println!("Failed to send server event: {:?}", why);
-    //             Err(Error::EventTxFailure)
-    //         }
-    //         Ok(_) => Ok(()),
-    //     }
-    // }
+    pub fn post_packet(&self, id: u32, pkt: C1Packet) -> Result<(), Error> {
+        let mut buf = vec![0u8; pkt.len()];
+
+        match pkt.serialize(&mut buf) {
+            Err(why) => {
+                println!(
+                    "Failed to send packet {:?}. Error: {:?}. Buf: {:?}",
+                    pkt,
+                    why,
+                    buf
+                );
+                Err(Error::SendPacketSerializeFailed)
+            }
+            Ok(_) => self.send_event(NetEvent::PostPacket(id, buf)),
+        }
+    }
+
+    fn send_event(&self, evt: NetEvent) -> Result<(), Error> {
+        let tx = match self.net_tx {
+            None => return Err(Error::EventTxNone),
+            Some(ref tx) => tx.clone(),
+        };
+
+        match tx.send(evt) {
+            Err(why) => {
+                println!("Failed to send server event: {:?}", why);
+                Err(Error::EventTxFailure)
+            }
+            Ok(_) => Ok(()),
+        }
+    }
 
     pub fn start(&mut self, listen_addr: &'a str, port: u16) {
         let cj_listener = match TcpListener::bind(format!("{}:{}", listen_addr, port)) {
@@ -60,6 +85,8 @@ impl<'a> Server {
         };
 
         let (stx, srx): (Sender<NetEvent>, Receiver<NetEvent>) = mpsc::channel();
+
+        self.net_tx = Some(stx.clone());
 
         thread::Builder::new()
             .name(format!("TCPServerListener"))
@@ -152,7 +179,7 @@ impl<'a> Server {
     }
 }
 
-impl Iterator for Server {
+impl<'a> Iterator for &'a Server {
     type Item = Event;
 
     fn next(&mut self) -> Option<Self::Item> {

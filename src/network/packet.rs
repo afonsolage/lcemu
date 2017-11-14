@@ -40,7 +40,7 @@ impl C1Packet {
     }
 
     pub fn len(&self) -> usize {
-        return self.data.len() + 2;
+        return self.data.len() + 3;
     }
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, PacketError> {
@@ -55,6 +55,14 @@ impl C1Packet {
 
         Ok(self.len())
     }
+
+    pub fn result(success: bool) -> C1Packet {
+        C1Packet {
+            sz: 4,
+            code: 0,
+            data: vec![if success { 1u8 } else { 0u8 }],
+        }
+    }
 }
 
 impl fmt::Display for C1Packet {
@@ -66,9 +74,6 @@ impl fmt::Display for C1Packet {
         Ok(())
     }
 }
-
-
-
 
 #[derive(Debug)]
 pub struct C2Packet {
@@ -95,7 +100,7 @@ impl C2Packet {
     }
 
     pub fn len(&self) -> usize {
-        return self.data.len() + 3;
+        return self.data.len() + 4;
     }
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, PacketError> {
