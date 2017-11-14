@@ -1,6 +1,7 @@
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::mpsc;
 use std::net::TcpListener;
+use std::net::UdpSocket;
 use std::thread;
 use std::collections::HashMap;
 
@@ -33,14 +34,34 @@ pub enum Error {
 pub struct Server {
     evt_tx: Sender<Event>,
     evt_rx: Receiver<Event>,
-    net_tx: Option<Sender<NetEvent>>,
+    net_tx: Sender<NetEvent>,
 }
 
 impl<'a> Server {
     pub fn new() -> Server {
         let (tx, rx): (Sender<Event>, Receiver<Event>) = mpsc::channel();
+        let (stx, srx): (Sender<NetEvent>, Receiver<NetEvent>) = mpsc::channel();
+
+        let cj_evt_tx = tx.clone();
+        thread::spawn(move || {
+            let mut sessions = HashMap::new();
+            println!("Waiting for Session Events.");
+            loop {
+                match srx.recv() {
+                    Err(why) => {
+                        println!("Failed to read Sessions RX: {:?}", why);
+                        break;
+                    }
+                    Ok(evt) => {
+                        println!("Received event {:?}", evt);
+                        Server::handle_event(&mut sessions, cj_evt_tx.clone(), evt);
+                    }
+                }
+            }
+        });
+
         Server {
-            net_tx: None,
+            net_tx: stx,
             evt_tx: tx,
             evt_rx: rx,
         }
@@ -64,10 +85,7 @@ impl<'a> Server {
     }
 
     fn send_event(&self, evt: NetEvent) -> Result<(), Error> {
-        let tx = match self.net_tx {
-            None => return Err(Error::EventTxNone),
-            Some(ref tx) => tx.clone(),
-        };
+        let tx = self.net_tx.clone();
 
         match tx.send(evt) {
             Err(why) => {
@@ -78,15 +96,42 @@ impl<'a> Server {
         }
     }
 
-    pub fn start(&mut self, listen_addr: &'a str, port: u16) {
+    pub fn start_udp(&mut self, listen_addr: &'a str, port: u16) {
+        let mut socket = match UdpSocket::bind(format!("{}:{}", listen_addr, port)) {
+            Err(why) => panic!("{:?}", why),
+            Ok(s) => s,
+        };
+
+        thread::Builder::new()
+            .name(format!("UDPServerListener"))
+            .spawn(move || {
+                let mut buf = [0; 0xFFFF];
+
+                loop {
+                    match socket.recv_from(&mut buf) {
+                        Err(_) => {
+                            println!("Failed to read from socket.");
+                            break;
+                        }
+                        Ok((rc, addr)) => if rc == 0 {
+                            println!("Read 0 bytes.");
+                            break;
+                        },
+                    };
+                }
+
+                println!("Quitting UDPServerListener");
+            })
+            .unwrap();
+    }
+
+    pub fn start_tcp(&mut self, listen_addr: &'a str, port: u16) {
         let cj_listener = match TcpListener::bind(format!("{}:{}", listen_addr, port)) {
             Err(why) => panic!("{:?}", why),
             Ok(listener) => listener,
         };
 
-        let (stx, srx): (Sender<NetEvent>, Receiver<NetEvent>) = mpsc::channel();
-
-        self.net_tx = Some(stx.clone());
+        let stx = self.net_tx.clone();
 
         thread::Builder::new()
             .name(format!("TCPServerListener"))
@@ -110,24 +155,6 @@ impl<'a> Server {
                 }
             })
             .unwrap();
-
-        let cj_evt_tx = self.evt_tx.clone();
-        thread::spawn(move || {
-            let mut sessions = HashMap::new();
-            println!("Waiting for Session Events.");
-            loop {
-                match srx.recv() {
-                    Err(why) => {
-                        println!("Failed to read Sessions RX: {:?}", why);
-                        break;
-                    }
-                    Ok(evt) => {
-                        println!("Received event {:?}", evt);
-                        Server::handle_event(&mut sessions, cj_evt_tx.clone(), evt);
-                    }
-                }
-            }
-        });
     }
 
     fn parse_packet(buf: &[u8]) -> Option<PacketType> {
