@@ -12,3 +12,7 @@ path = "src/network/lib.rs"
 [[bin]]
 name = "cs"
 path = "src/cs/main.rs"
+
+[[bin]]
+name = "gs"
+path = "src/gs/main.rs"

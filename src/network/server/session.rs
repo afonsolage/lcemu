@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use std::net::TcpStream;
 use std::thread;
 
-use super::server::NetEvent;
+use super::NetEvent;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -18,14 +18,14 @@ pub enum SessionError {
 }
 
 #[derive(Debug)]
-pub struct Session {
+pub struct TcpSession {
     pub id: u32,
     stream: TcpStream,
     rx_handler: thread::JoinHandle<()>,
 }
 
 
-impl Session {
+impl TcpSession {
     pub fn read_n_bytes(
         out: &mut [u8],
         cnt: usize,
@@ -67,7 +67,7 @@ impl Session {
                     Err(SessionError::C1ErrorEosReached)
                 } else {
                     out[0] = sz_buf[0];
-                    Session::read_n_bytes(&mut out[1..], c1_sz, stream)
+                    TcpSession::read_n_bytes(&mut out[1..], c1_sz, stream)
                 }
             }
         }
@@ -86,7 +86,7 @@ impl Session {
         stream: &mut TcpStream,
     ) -> Result<usize, SessionError> {
         out[0] = header;
-        match Session::read_c1_data(&mut out[1..], stream) {
+        match TcpSession::read_c1_data(&mut out[1..], stream) {
             Err(why) => Err(why),
             Ok(read_cnt) => {
                 let len = out[1] as usize;
@@ -118,7 +118,7 @@ impl Session {
                     println!("EOF reached on session: {}", id);
                     break;
                 }
-                Ok(_) => match Session::parse_packet(buf[0], &mut packet_buf, &mut stream) {
+                Ok(_) => match TcpSession::parse_packet(buf[0], &mut packet_buf, &mut stream) {
                     Err(why) => {
                         println!("Failed to read packet data: {:?}", why);
                         break;
@@ -137,14 +137,14 @@ impl Session {
             }
         }
 
-        Session::close_client(&mut tx, id);
+        TcpSession::close_client(&mut tx, id);
     }
 
     pub fn new(
         id: u32,
         stream: TcpStream,
         srv_tx: Sender<NetEvent>,
-    ) -> Result<Session, SessionError> {
+    ) -> Result<TcpSession, SessionError> {
         let rx_stream = match stream.try_clone() {
             Err(why) => {
                 println!("Failed to clone stream: {:?}", why);
@@ -155,7 +155,7 @@ impl Session {
 
         let rx_handler = match thread::Builder::new()
             .name(format!("Session {} RX", id))
-            .spawn(move || Session::main_loop(srv_tx, rx_stream, id))
+            .spawn(move || TcpSession::main_loop(srv_tx, rx_stream, id))
         {
             Err(why) => {
                 println!("Failed to create session loop thread: {:?}", why);
@@ -164,7 +164,7 @@ impl Session {
             Ok(handler) => handler,
         };
 
-        Ok(Session {
+        Ok(TcpSession {
             id: id,
             stream: stream,
             rx_handler: rx_handler,

@@ -1,10 +1,5 @@
 
-use network::Server;
-use network::Event;
-use network::Packet;
-use network::Protocol;
-
-use protocol::ConnectResult;
+use network::prelude::*;
 
 pub struct Handler {}
 

@@ -1,12 +1,11 @@
 extern crate network;
 
 mod logic;
-mod protocol;
 
 fn main() {
-    println!("Starting server...");
+    println!("Starting Connect Server...");
     let mut server = network::Server::new();
-    server.start_tcp("0.0.0.0", 44405);
+    server.start_tcp("0.0.0.0", 55900);
     server.start_udp("0.0.0.0", 55557);
 
     let handler = logic::Handler::new();

@@ -2,15 +2,18 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::mpsc;
 use std::net::TcpListener;
 use std::net::UdpSocket;
+use std::net::SocketAddr;
 use std::thread;
 use std::collections::HashMap;
 
-use super::Session;
+mod session;
+
+use self::session::TcpSession;
 use super::packet::Packet;
 
 #[derive(Debug)]
 pub enum NetEvent {
-    Connected(Session),
+    Connected(TcpSession),
     Disconnected(u32),
     PacketData(Vec<u8>),
     PostPacket(u32, Vec<u8>),
@@ -27,11 +30,15 @@ pub enum Error {
     EventTxFailure,
     EventTxNone,
     SendPacketSerializeFailed,
+    UdpClientNotFound,
+    UdpSendError,
 }
 
 pub struct Server {
     evt_rx: Receiver<Event>,
     net_tx: Sender<NetEvent>,
+    udp_clients: HashMap<u32, (SocketAddr, UdpSocket)>,
+    snd_buf: Vec<u8>,
 }
 
 impl<'a> Server {
@@ -59,6 +66,40 @@ impl<'a> Server {
         Server {
             net_tx: stx,
             evt_rx: rx,
+            udp_clients: HashMap::new(),
+            snd_buf: vec![0; 65536],
+        }
+    }
+
+    pub fn add_udp_client(&mut self, id: u32, address: &'a str, port: u32) {
+        let addr = format!("{}:{}", address, port);
+        let addr: SocketAddr = addr.parse().expect("Invalid addr supplied: ");
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket.");
+
+        self.udp_clients.insert(id, (addr, socket));
+    }
+
+    pub fn send_udp_packet(&mut self, id: u32, pkt: Packet) -> Result<(), Error> {
+        let mut buf = &mut self.snd_buf[0..pkt.len()];
+
+        match self.udp_clients.get(&id) {
+            None => Err(Error::UdpClientNotFound),
+            Some(&(ref addr, ref socket)) => match pkt.serialize(&mut buf) {
+                Err(why) => {
+                    println!("Failed to send udp packet: {:?}", why);
+                    return Err(Error::UdpSendError);
+                }
+                Ok(_) => match socket.send_to(&buf, &addr) {
+                    Err(why) => {
+                        println!("Failed to send udp packet: {:?}", why);
+                        return Err(Error::UdpSendError);
+                    }
+                    Ok(_) => {
+                        println!("=>[{:?}]: {}", addr, pkt);
+                        Ok(())
+                    }
+                },
+            },
         }
     }
 
@@ -143,7 +184,8 @@ impl<'a> Server {
             .spawn(move || {
                 let mut client_index = 1u32;
                 for stream in cj_listener.incoming() {
-                    let session = match Session::new(client_index, stream.unwrap(), stx.clone()) {
+                    let session = match TcpSession::new(client_index, stream.unwrap(), stx.clone())
+                    {
                         Err(_) => continue,
                         Ok(ss) => ss,
                     };
@@ -172,7 +214,7 @@ impl<'a> Server {
     }
 
     pub fn handle_event(
-        sessions: &mut HashMap<u32, Session>,
+        sessions: &mut HashMap<u32, TcpSession>,
         evt_tx: Sender<Event>,
         evt: NetEvent,
     ) {

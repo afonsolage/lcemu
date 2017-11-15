@@ -46,7 +46,7 @@ impl Packet {
         proto.serialize(&mut v);
         Packet {
             kind: kind,
-            sz: len,
+            sz: len + if kind == 0xC1 { 3 } else { 4 },
             code: code,
             data: v,
         }
@@ -89,8 +89,8 @@ impl Packet {
 
         buf[idx] = self.code;
         idx += 1;
-
-        buf[idx..].clone_from_slice(&self.data);
+        
+        buf[idx..self.len()].clone_from_slice(&self.data);
 
         Ok(self.len())
     }
