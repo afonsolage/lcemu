@@ -68,7 +68,7 @@ impl<'a> Server {
         match pkt.serialize(&mut buf) {
             Err(why) => {
                 println!(
-                    "Failed to send packet {:?}. Error: {:?}. Buf: {:?}",
+                    "Failed to send packet {}. Error: {:?}. Buf: {:?}",
                     pkt,
                     why,
                     buf
