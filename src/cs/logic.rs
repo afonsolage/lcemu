@@ -2,8 +2,9 @@
 use network::Server;
 use network::Event;
 use network::Packet;
-use protocol::Protocol;
-use protocol;
+use network::Protocol;
+
+use protocol::ConnectResult;
 
 pub struct Handler {}
 
@@ -21,7 +22,7 @@ impl Handler {
     }
 
     fn on_client_connected(&self, id: u32, srv: &Server) {
-        let res = protocol::ConnectResult { res: 1 };
+        let res = ConnectResult { res: 1 };
         srv.post_packet(id, res.to_packet()).ok();
     }
 

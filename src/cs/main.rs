@@ -1,4 +1,5 @@
-mod network;
+extern crate network;
+
 mod logic;
 mod protocol;
 
