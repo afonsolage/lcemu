@@ -1,8 +1,9 @@
 
 use network::Server;
 use network::Event;
-use network::PacketType;
-use network::C1Packet;
+use network::Packet;
+use protocol::Protocol;
+use protocol;
 
 pub struct Handler {}
 
@@ -12,8 +13,6 @@ impl Handler {
     }
 
     pub fn handle(&self, evt: Event, srv: &Server) {
-        println!("Got: {:?}", evt);
-
         match evt {
             Event::ClientConnected(id) => self.on_client_connected(id, srv),
             Event::ClientDisconnected(id) => self.on_client_disconnected(id, srv),
@@ -22,12 +21,18 @@ impl Handler {
     }
 
     fn on_client_connected(&self, id: u32, srv: &Server) {
-        let pkt = C1Packet::result(true);
-
-        srv.post_packet(id, pkt).ok();
+        let res = protocol::ConnectResult { res: 1 };
+        srv.post_packet(id, res.to_packet()).ok();
     }
 
-    fn on_client_disconnected(&self, id: u32, srv: &Server) {}
+    fn on_client_disconnected(&self, id: u32, _: &Server) {
+        println!("Client disconnected {}", id)
+    }
 
-    fn on_packet_received(&self, pkt: PacketType, srv: &Server) {}
+    fn on_packet_received(&self, pkt: Packet, _: &Server) {
+        match pkt.code {
+            0x02 => (), //JoinServerStat
+            _ => println!("Unhandled packet: {}", pkt),
+        };
+    }
 }

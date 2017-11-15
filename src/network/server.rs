@@ -6,9 +6,7 @@ use std::thread;
 use std::collections::HashMap;
 
 use super::Session;
-use super::PacketType;
-use super::packet::C1Packet;
-use super::packet::C2Packet;
+use super::packet::Packet;
 
 #[derive(Debug)]
 pub enum NetEvent {
@@ -22,7 +20,7 @@ pub enum NetEvent {
 pub enum Event {
     ClientConnected(u32),
     ClientDisconnected(u32),
-    ClientPacket(PacketType),
+    ClientPacket(Packet),
 }
 
 pub enum Error {
@@ -32,7 +30,6 @@ pub enum Error {
 }
 
 pub struct Server {
-    evt_tx: Sender<Event>,
     evt_rx: Receiver<Event>,
     net_tx: Sender<NetEvent>,
 }
@@ -53,7 +50,6 @@ impl<'a> Server {
                         break;
                     }
                     Ok(evt) => {
-                        println!("Received event {:?}", evt);
                         Server::handle_event(&mut sessions, cj_evt_tx.clone(), evt);
                     }
                 }
@@ -62,12 +58,11 @@ impl<'a> Server {
 
         Server {
             net_tx: stx,
-            evt_tx: tx,
             evt_rx: rx,
         }
     }
 
-    pub fn post_packet(&self, id: u32, pkt: C1Packet) -> Result<(), Error> {
+    pub fn post_packet(&self, id: u32, pkt: Packet) -> Result<(), Error> {
         let mut buf = vec![0u8; pkt.len()];
 
         match pkt.serialize(&mut buf) {
@@ -97,26 +92,36 @@ impl<'a> Server {
     }
 
     pub fn start_udp(&mut self, listen_addr: &'a str, port: u16) {
-        let mut socket = match UdpSocket::bind(format!("{}:{}", listen_addr, port)) {
+        let socket = match UdpSocket::bind(format!("{}:{}", listen_addr, port)) {
             Err(why) => panic!("{:?}", why),
             Ok(s) => s,
         };
 
+        let tx = self.net_tx.clone();
         thread::Builder::new()
             .name(format!("UDPServerListener"))
             .spawn(move || {
                 let mut buf = [0; 0xFFFF];
-
                 loop {
                     match socket.recv_from(&mut buf) {
                         Err(_) => {
                             println!("Failed to read from socket.");
                             break;
                         }
-                        Ok((rc, addr)) => if rc == 0 {
-                            println!("Read 0 bytes.");
-                            break;
-                        },
+                        Ok((rc, _)) => {
+                            if rc == 0 {
+                                println!("Read 0 bytes.");
+                                break;
+                            }
+
+                            match tx.send(NetEvent::PacketData(buf[0..rc].to_vec())) {
+                                Err(why) => {
+                                    println!("Failed to send SessionEvent: {:?}", why);
+                                    break;
+                                }
+                                _ => (),
+                            }
+                        }
                     };
                 }
 
@@ -157,20 +162,13 @@ impl<'a> Server {
             .unwrap();
     }
 
-    fn parse_packet(buf: &[u8]) -> Option<PacketType> {
+    fn parse_packet(buf: &[u8]) -> Option<Packet> {
         if buf.len() < 2 {
             println!("Failed to parse packet: Length is too smal: {}", buf.len());
             return None;
         }
 
-        match buf[0] {
-            0xC1 => Some(PacketType::C1(C1Packet::new(&buf[1..]))),
-            0xC2 => Some(PacketType::C2(C2Packet::new(&buf[1..]))),
-            _ => {
-                println!("Unsupported code received: {}", buf[0]);
-                None
-            }
-        }
+        Some(Packet::new(buf))
     }
 
     pub fn handle_event(
