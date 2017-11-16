@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use std::net::TcpStream;
 use std::thread;
 
-use super::NetEvent;
+use super::SessionEvent;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -73,8 +73,8 @@ impl TcpSession {
         }
     }
 
-    fn close_client(srv_tx: &mut Sender<NetEvent>, id: u32) {
-        match srv_tx.send(NetEvent::Disconnected(id)) {
+    fn close_client(srv_tx: &mut Sender<SessionEvent>, id: u32) {
+        match srv_tx.send(SessionEvent::Disconnected(id)) {
             Err(why) => panic!("{:?}", why),
             _ => (),
         }
@@ -101,7 +101,7 @@ impl TcpSession {
         }
     }
 
-    fn main_loop(srv_tx: Sender<NetEvent>, mut stream: TcpStream, id: u32) {
+    fn main_loop(srv_tx: Sender<SessionEvent>, mut stream: TcpStream, id: u32) {
         let mut tx = srv_tx;
         let mut packet_buf = [0; 65536]; //64k
         let mut buf = [0];
@@ -125,7 +125,7 @@ impl TcpSession {
                     }
                     Ok(cnt) => {
                         println!("{:?} bytes was read.", cnt);
-                        match tx.send(NetEvent::PacketData(packet_buf[0..cnt].to_vec())) {
+                        match tx.send(SessionEvent::PacketData(packet_buf[0..cnt].to_vec())) {
                             Err(why) => {
                                 println!("Failed to send SessionEvent: {:?}", why);
                                 break;
@@ -143,7 +143,7 @@ impl TcpSession {
     pub fn new(
         id: u32,
         stream: TcpStream,
-        srv_tx: Sender<NetEvent>,
+        srv_tx: Sender<SessionEvent>,
     ) -> Result<TcpSession, SessionError> {
         let rx_stream = match stream.try_clone() {
             Err(why) => {

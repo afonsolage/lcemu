@@ -12,7 +12,7 @@ use self::session::TcpSession;
 use super::packet::Packet;
 
 #[derive(Debug)]
-pub enum NetEvent {
+pub enum SessionEvent {
     Connected(TcpSession),
     Disconnected(u32),
     PacketData(Vec<u8>),
@@ -26,25 +26,78 @@ pub enum Event {
     ClientPacket(Packet),
 }
 
+#[derive(Debug)]
 pub enum Error {
     EventTxFailure,
     EventTxNone,
     SendPacketSerializeFailed,
     UdpClientNotFound,
     UdpSendError,
+    UdpClientCloneFail,
 }
 
 pub struct Server {
     evt_rx: Receiver<Event>,
-    net_tx: Sender<NetEvent>,
-    udp_clients: HashMap<u32, (SocketAddr, UdpSocket)>,
-    snd_buf: Vec<u8>,
+    net_tx: Sender<SessionEvent>,
+    udp_clients: HashMap<u32, UdpClient>,
+}
+
+#[derive(Debug)]
+pub struct UdpClient {
+    id: u32,
+    addr: SocketAddr,
+    socket: UdpSocket,
+}
+
+impl<'a> UdpClient {
+    pub fn new(id: u32, address: &'a str, port: u16) -> UdpClient {
+        let addr = format!("{}:{}", address, port);
+        let addr: SocketAddr = addr.parse().expect("Invalid addr supplied: ");
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket.");
+
+        UdpClient {
+            id: id,
+            addr: addr,
+            socket: socket,
+        }
+    }
+
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        match self.socket.try_clone() {
+            Err(_) => Err(Error::UdpClientCloneFail),
+            Ok(socket) => Ok(UdpClient {
+                id: self.id,
+                addr: self.addr.clone(),
+                socket: socket,
+            }),
+        }
+    }
+
+    pub fn send(&self, pkt: &Packet) -> Result<(), Error> {
+        let mut buf = vec![0; pkt.len()];
+        match pkt.serialize(&mut buf) {
+            Err(why) => {
+                println!("Failed to send udp packet: {:?}", why);
+                return Err(Error::UdpSendError);
+            }
+            Ok(_) => match self.socket.send_to(&buf, &self.addr) {
+                Err(why) => {
+                    println!("Failed to send udp packet: {:?}", why);
+                    return Err(Error::UdpSendError);
+                }
+                Ok(_) => {
+                    println!("=>[{:?}]: {}", &self.addr, pkt);
+                    Ok(())
+                }
+            },
+        }
+    }
 }
 
 impl<'a> Server {
     pub fn new() -> Server {
         let (tx, rx): (Sender<Event>, Receiver<Event>) = mpsc::channel();
-        let (stx, srx): (Sender<NetEvent>, Receiver<NetEvent>) = mpsc::channel();
+        let (stx, srx): (Sender<SessionEvent>, Receiver<SessionEvent>) = mpsc::channel();
 
         let cj_evt_tx = tx.clone();
         thread::spawn(move || {
@@ -67,39 +120,18 @@ impl<'a> Server {
             net_tx: stx,
             evt_rx: rx,
             udp_clients: HashMap::new(),
-            snd_buf: vec![0; 65536],
         }
     }
 
-    pub fn add_udp_client(&mut self, id: u32, address: &'a str, port: u32) {
-        let addr = format!("{}:{}", address, port);
-        let addr: SocketAddr = addr.parse().expect("Invalid addr supplied: ");
-        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket.");
-
-        self.udp_clients.insert(id, (addr, socket));
+    pub fn add_udp_client(&mut self, id: u32, address: &'a str, port: u16) {
+        let client = UdpClient::new(id, address, port);
+        self.udp_clients.insert(client.id, client);
     }
 
-    pub fn send_udp_packet(&mut self, id: u32, pkt: Packet) -> Result<(), Error> {
-        let mut buf = &mut self.snd_buf[0..pkt.len()];
-
+    pub fn get_udp_client(&self, id: u32) -> Result<UdpClient, Error> {
         match self.udp_clients.get(&id) {
             None => Err(Error::UdpClientNotFound),
-            Some(&(ref addr, ref socket)) => match pkt.serialize(&mut buf) {
-                Err(why) => {
-                    println!("Failed to send udp packet: {:?}", why);
-                    return Err(Error::UdpSendError);
-                }
-                Ok(_) => match socket.send_to(&buf, &addr) {
-                    Err(why) => {
-                        println!("Failed to send udp packet: {:?}", why);
-                        return Err(Error::UdpSendError);
-                    }
-                    Ok(_) => {
-                        println!("=>[{:?}]: {}", addr, pkt);
-                        Ok(())
-                    }
-                },
-            },
+            Some(client) => client.try_clone(),
         }
     }
 
@@ -116,11 +148,11 @@ impl<'a> Server {
                 );
                 Err(Error::SendPacketSerializeFailed)
             }
-            Ok(_) => self.send_event(NetEvent::PostPacket(id, buf)),
+            Ok(_) => self.send_event(SessionEvent::PostPacket(id, buf)),
         }
     }
 
-    fn send_event(&self, evt: NetEvent) -> Result<(), Error> {
+    fn send_event(&self, evt: SessionEvent) -> Result<(), Error> {
         let tx = self.net_tx.clone();
 
         match tx.send(evt) {
@@ -155,7 +187,7 @@ impl<'a> Server {
                                 break;
                             }
 
-                            match tx.send(NetEvent::PacketData(buf[0..rc].to_vec())) {
+                            match tx.send(SessionEvent::PacketData(buf[0..rc].to_vec())) {
                                 Err(why) => {
                                     println!("Failed to send SessionEvent: {:?}", why);
                                     break;
@@ -192,7 +224,7 @@ impl<'a> Server {
 
                     client_index += 1;
 
-                    match stx.send(NetEvent::Connected(session)) {
+                    match stx.send(SessionEvent::Connected(session)) {
                         Err(why) => {
                             println!("Failed to send SessionEvent: {:?}", why);
                             break;
@@ -216,25 +248,25 @@ impl<'a> Server {
     pub fn handle_event(
         sessions: &mut HashMap<u32, TcpSession>,
         evt_tx: Sender<Event>,
-        evt: NetEvent,
+        evt: SessionEvent,
     ) {
         match evt {
-            NetEvent::Disconnected(id) => {
+            SessionEvent::Disconnected(id) => {
                 sessions.remove(&id);
                 evt_tx.send(Event::ClientDisconnected(id)).ok();
             }
-            NetEvent::Connected(session) => {
+            SessionEvent::Connected(session) => {
                 let id = session.id;
                 sessions.insert(session.id, session);
                 evt_tx.send(Event::ClientConnected(id)).ok();
             }
-            NetEvent::PacketData(ref buf) => match Server::parse_packet(buf) {
+            SessionEvent::PacketData(ref buf) => match Server::parse_packet(buf) {
                 None => println!("Invalid packet data received: {:?}", buf),
                 Some(pkt) => {
                     evt_tx.send(Event::ClientPacket(pkt)).ok();
                 }
             },
-            NetEvent::PostPacket(ref id, ref buf) => {
+            SessionEvent::PostPacket(ref id, ref buf) => {
                 let mut session = match sessions.get_mut(&id) {
                     None => return,
                     Some(s) => s,
