@@ -14,7 +14,7 @@ fn main() {
 
     let mut settings = config::Config::default();
     settings
-        .merge(config::File::with_name("GameServer.toml"))
+        .merge(config::File::with_name("config/gs.toml"))
         .expect("Failed to load config file.");
 
     let server = setup_networking(&settings);
