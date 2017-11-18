@@ -17,6 +17,7 @@ pub enum SessionEvent {
     Disconnected(u32),
     PacketData(Vec<u8>),
     PostPacket(u32, Vec<u8>),
+    RequestDisconnect(u32),
 }
 
 #[derive(Debug)]
@@ -137,7 +138,7 @@ impl<'a> Server {
 
     pub fn post_packet(&self, id: u32, pkt: Packet) -> Result<(), Error> {
         let mut buf = vec![0u8; pkt.len()];
-
+        
         match pkt.serialize(&mut buf) {
             Err(why) => {
                 println!(
@@ -150,6 +151,10 @@ impl<'a> Server {
             }
             Ok(_) => self.send_event(SessionEvent::PostPacket(id, buf)),
         }
+    }
+
+    pub fn disconnect(&self, id: u32) -> Result<(), Error> {
+        self.send_event(SessionEvent::RequestDisconnect(id))
     }
 
     fn send_event(&self, evt: SessionEvent) -> Result<(), Error> {
@@ -165,7 +170,9 @@ impl<'a> Server {
     }
 
     pub fn start_udp(&mut self, listen_addr: &'a str, port: u16) {
-        let socket = match UdpSocket::bind(format!("{}:{}", listen_addr, port)) {
+        let bind = format!("{}:{}", listen_addr, port);
+        println!("Binding UDP on {}", bind);
+        let socket = match UdpSocket::bind(bind) {
             Err(why) => panic!("{:?}", why),
             Ok(s) => s,
         };
@@ -204,7 +211,9 @@ impl<'a> Server {
     }
 
     pub fn start_tcp(&mut self, listen_addr: &'a str, port: u16) {
-        let cj_listener = match TcpListener::bind(format!("{}:{}", listen_addr, port)) {
+        let bind = format!("{}:{}", listen_addr, port);
+        println!("Binding TCP on {}", bind);
+        let cj_listener = match TcpListener::bind(bind) {
             Err(why) => panic!("{:?}", why),
             Ok(listener) => listener,
         };
@@ -273,6 +282,9 @@ impl<'a> Server {
                 };
 
                 session.send(&buf).ok();
+            },
+            SessionEvent::RequestDisconnect(ref id) => {
+                
             }
         };
     }

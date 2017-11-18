@@ -1,10 +1,38 @@
 use super::Packet;
 use super::util::*;
 
+#[derive(Debug)]
+pub enum ProtoMsg {
+    ServerInfo,
+    JoinServerStat,
+    ConnectResult,
+    ServerList,
+}
+
+pub const SUB_CODE_PKTS: [u8; 1] = [0xF4];
+
+impl ProtoMsg {
+    #[allow(unreachable_patterns)]
+    pub fn parse(&self) -> (u8, u8, u8) {
+        match *self {
+            //Type (C1, C2, C3, C4)
+            //Data Lenght (excluding header)
+            //Code
+            //Sub code (0x00 if none)
+            ProtoMsg::ServerInfo => (0xC1, 0x00, 0x00),
+            ProtoMsg::JoinServerStat => (0xC1, 0x02, 0x00),
+            ProtoMsg::ConnectResult => (0xC1, 0x00, 0x00),
+            ProtoMsg::ServerList => (0xC2, 0xF4, 0x06),
+            _ => panic!("Unimplemented ProtoMsg: {:?}", *self),
+        }
+    }
+}
+
 pub trait Protocol {
     fn parse(&[u8]) -> Self;
     fn serialize(&self, &mut [u8]);
     fn to_packet(&self) -> Packet;
+    fn len(&self) -> u16;
 }
 
 pub struct ServerInfo {
@@ -38,7 +66,11 @@ impl Protocol for ServerInfo {
     }
 
     fn to_packet(&self) -> Packet {
-        Packet::from_protocol(0xC1, 11, 0x01, self)
+        Packet::from_protocol(ProtoMsg::ServerInfo, self)
+    }
+
+    fn len(&self) -> u16 {
+        11
     }
 }
 
@@ -58,7 +90,11 @@ impl Protocol for JoinServerStat {
     }
 
     fn to_packet(&self) -> Packet {
-        Packet::from_protocol(0xC1, 4, 0x02, self)
+        Packet::from_protocol(ProtoMsg::JoinServerStat, self)
+    }
+
+    fn len(&self) -> u16 {
+        4
     }
 }
 
@@ -76,6 +112,55 @@ impl Protocol for ConnectResult {
     }
 
     fn to_packet(&self) -> Packet {
-        Packet::from_protocol(0xC1, 1, 0x00, self)
+        Packet::from_protocol(ProtoMsg::ConnectResult, self)
+    }
+
+    fn len(&self) -> u16 {
+        1
+    }
+}
+
+pub struct ServerList {
+    cnt: u16,
+    data: Vec<(u16, u8)>,
+}
+
+impl ServerList {
+    pub fn new(cnt: u16) -> Self {
+        ServerList {
+            cnt: cnt,
+            data: vec![],
+        }
+    }
+
+    pub fn add(&mut self, idx: u16, load: u8) {
+        self.data.push((idx, load));
+    }
+}
+
+impl Protocol for ServerList {
+    fn parse(_: &[u8]) -> Self {
+        panic!("not used");
+    }
+
+    fn serialize(&self, buf: &mut [u8]) {
+        set_u16(&mut buf[0..2], self.cnt);
+
+        let mut i = 2;
+        for &(idx, load) in self.data.iter() {
+            set_u16(&mut buf[i..i + 2], idx); //The range end is exclusive.
+            buf[i + 2] = load;
+            buf[i + 3] = 0xFF; //Unkown data.
+
+            i += 4;
+        }
+    }
+
+    fn to_packet(&self) -> Packet {
+        Packet::from_protocol(ProtoMsg::ServerList, self)
+    }
+
+    fn len(&self) -> u16 {
+        2 + (self.data.len() * 4) as u16 //The size of each item is 4, because there is a fixed byte (0xCC)
     }
 }

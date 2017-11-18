@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use config;
 use network::prelude::*;
-use std::net::SocketAddr;
 
 struct GSInstance {
     pub svr_code: u16,
@@ -12,6 +11,15 @@ struct GSInstance {
     pub acc_cnt: u16,
     pub pcbng_cnt: u16,
     pub mx_usr_cnt: u16,
+}
+
+impl GSInstance {
+    pub fn load(&self) -> u8 {
+        match self.mx_usr_cnt {
+            0 => 0,
+            _ => (self.usr_cnt / self.mx_usr_cnt) as u8,
+        }
+    }
 }
 
 pub struct Handler {
@@ -67,7 +75,15 @@ impl Handler {
                     "Failed to parse config. Section {} doesnt have addr config.",
                     key
                 ),
-                Some(r) => r,
+                Some(str_addr) => {
+                    if str_addr.len() >= 16 {
+                        panic!("Invalid addr on section: {}", key);
+                    }
+
+                    let mut addr = [0u8; 16];
+                    addr[..str_addr.len()].copy_from_slice(&str_addr.as_bytes());
+                    addr
+                }
             };
 
             let port = match val.get("port") {
@@ -83,7 +99,7 @@ impl Handler {
 
             let gs = GSInstance {
                 svr_code: code,
-                ip: [0; 16],
+                ip: addr,
                 port: port,
                 perc: 0,
                 usr_cnt: 0,
@@ -91,30 +107,77 @@ impl Handler {
                 pcbng_cnt: 0,
                 mx_usr_cnt: 0,
             };
+
+            self.gs_map.insert(gs.svr_code, gs);
+        }
+
+        if self.gs_map.len() == 0 {
+            panic!("No GS settings found on config file. Please add at least one.");
+        } else {
+            println!("Loaded {} gs config(s).", self.gs_map.len());
         }
     }
 
-    pub fn handle(&self, evt: Event, srv: &Server) {
+    pub fn handle(&mut self, evt: Event, svr: &Server) {
         match evt {
-            Event::ClientConnected(id) => self.on_client_connected(id, srv),
-            Event::ClientDisconnected(id) => self.on_client_disconnected(id, srv),
-            Event::ClientPacket(pkt) => self.on_packet_received(pkt, srv),
+            Event::ClientConnected(id) => self.on_client_connected(id, svr),
+            Event::ClientDisconnected(id) => self.on_client_disconnected(id, svr),
+            Event::ClientPacket(pkt) => self.on_packet_received(pkt, svr),
         };
     }
 
-    fn on_client_connected(&self, id: u32, srv: &Server) {
+    fn on_client_connected(&self, id: u32, svr: &Server) {
         let res = ConnectResult { res: 1 };
-        srv.post_packet(id, res.to_packet()).ok();
+
+        match svr.post_packet(id, res.to_packet()) {
+            Err(_) => svr.disconnect(id),
+            _ => match self.send_server_list(id, svr) {
+                Err(_) => svr.disconnect(id),
+                _ => Ok(()),
+            },
+        }.ok();
     }
 
     fn on_client_disconnected(&self, id: u32, _: &Server) {
         println!("Client disconnected {}", id)
     }
 
-    fn on_packet_received(&self, pkt: Packet, _: &Server) {
+    fn on_packet_received(&mut self, pkt: Packet, svr: &Server) {
         match pkt.code {
+            0x01 => self.on_server_info(ServerInfo::parse(&pkt.data), svr),
             0x02 => (), //JoinServerStat
             _ => println!("Unhandled packet: {}", pkt),
         };
+    }
+
+    fn on_server_info(&mut self, msg: ServerInfo, _: &Server) {
+        let code = msg.svr_code;
+
+        let info = match self.gs_map.get_mut(&code) {
+            None => {
+                println!(
+                    "Received info from gs {}, but there is config for it!.",
+                    code
+                );
+                return;
+            }
+            Some(r) => r,
+        };
+
+        info.perc = msg.perc;
+        info.usr_cnt = msg.usr_cnt;
+        info.acc_cnt = msg.acc_cnt;
+        info.pcbng_cnt = msg.pcbng_cnt;
+        info.mx_usr_cnt = msg.mx_usr_cnt;
+    }
+
+    fn send_server_list(&self, id: u32, svr: &Server) -> Result<(), Error> {
+        let mut list = ServerList::new(self.gs_map.len() as u16);
+
+        for (_, info) in self.gs_map.iter() {
+            list.add(info.svr_code, info.load());
+        }
+
+        svr.post_packet(id, list.to_packet())
     }
 }

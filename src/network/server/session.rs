@@ -124,7 +124,6 @@ impl TcpSession {
                         break;
                     }
                     Ok(cnt) => {
-                        println!("{:?} bytes was read.", cnt);
                         match tx.send(SessionEvent::PacketData(packet_buf[0..cnt].to_vec())) {
                             Err(why) => {
                                 println!("Failed to send SessionEvent: {:?}", why);

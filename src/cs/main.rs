@@ -12,9 +12,7 @@ fn main() {
         .merge(config::File::with_name("config/cs.toml"))
         .expect("Failed to load config file.");
 
-    let mut server = Server::new();
-    server.start_tcp("0.0.0.0", 44405);
-    server.start_udp("0.0.0.0", 55557);
+    let server = setup_networking(&settings);
 
     let mut handler = logic::Handler::new();
     handler.setup(&settings);
@@ -44,7 +42,7 @@ fn setup_networking(settings: &config::Config) -> Server {
 
     //Setup UDP Clients
     {
-        let listen_udp_addr = match settings.get_str("network.listen_udp_port") {
+        let listen_udp_addr = match settings.get_str("network.listen_udp_addr") {
             Ok(addr) => addr,
             Err(_) => format!("0.0.0.0"),
         };

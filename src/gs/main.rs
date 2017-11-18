@@ -18,7 +18,7 @@ fn main() {
         .expect("Failed to load config file.");
 
     let server = setup_networking(&settings);
-    let executor = setup_executor(&server, &settings);
+    let _executor = setup_executor(&server, &settings);
 
     let handler = logic::Handler::new();
 
