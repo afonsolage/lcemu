@@ -19,7 +19,7 @@ impl ProtoMsg {
             //Data Lenght (excluding header)
             //Code
             //Sub code (0x00 if none)
-            ProtoMsg::ServerInfo => (0xC1, 0x00, 0x00),
+            ProtoMsg::ServerInfo => (0xC1, 0x01, 0x00),
             ProtoMsg::JoinServerStat => (0xC1, 0x02, 0x00),
             ProtoMsg::ConnectResult => (0xC1, 0x00, 0x00),
             ProtoMsg::ServerList => (0xC2, 0xF4, 0x06),

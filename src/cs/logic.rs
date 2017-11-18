@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use config;
 use network::prelude::*;
 
@@ -24,12 +24,14 @@ impl GSInstance {
 
 pub struct Handler {
     gs_map: HashMap<u16, GSInstance>,
+    clients: HashSet<u32>,
 }
 
 impl Handler {
     pub fn new() -> Handler {
         Handler {
             gs_map: HashMap::new(),
+            clients: HashSet::new(),
         }
     }
 
@@ -126,20 +128,38 @@ impl Handler {
         };
     }
 
-    fn on_client_connected(&self, id: u32, svr: &Server) {
+    fn broadcast(&self, pkt: Packet, svr: &Server) -> Vec<u32> {
+        let mut errs: Vec<u32> = vec![];
+        for &id in self.clients.iter() {
+            match svr.post_packet(id, pkt.clone()) {
+                Err(_) => errs.push(id),
+                Ok(_) => (),
+            };
+        }
+
+        errs
+    }
+
+    fn on_client_connected(&mut self, id: u32, svr: &Server) {
         let res = ConnectResult { res: 1 };
 
         match svr.post_packet(id, res.to_packet()) {
             Err(_) => svr.disconnect(id),
-            _ => match self.send_server_list(id, svr) {
-                Err(_) => svr.disconnect(id),
-                _ => Ok(()),
-            },
+            _ => 
+                // match self.send_server_list(id, svr) {
+                //     Err(_) => svr.disconnect(id),
+                //     _ => Ok(()),
+                //} 
+                Ok(())
+            ,
         }.ok();
+
+        self.clients.insert(id);
     }
 
-    fn on_client_disconnected(&self, id: u32, _: &Server) {
-        println!("Client disconnected {}", id)
+    fn on_client_disconnected(&mut self, id: u32, _: &Server) {
+        println!("Client disconnected {}", id);
+        self.clients.remove(&id);
     }
 
     fn on_packet_received(&mut self, pkt: Packet, svr: &Server) {
@@ -150,34 +170,45 @@ impl Handler {
         };
     }
 
-    fn on_server_info(&mut self, msg: ServerInfo, _: &Server) {
+    fn on_server_info(&mut self, msg: ServerInfo, svr: &Server) {
         let code = msg.svr_code;
 
-        let info = match self.gs_map.get_mut(&code) {
-            None => {
-                println!(
-                    "Received info from gs {}, but there is config for it!.",
-                    code
-                );
-                return;
-            }
-            Some(r) => r,
-        };
+        {
+            let info = match self.gs_map.get_mut(&code) {
+                None => {
+                    println!(
+                        "Received info from gs {}, but there is config for it!.",
+                        code
+                    );
+                    return;
+                }
+                Some(r) => r,
+            };
 
-        info.perc = msg.perc;
-        info.usr_cnt = msg.usr_cnt;
-        info.acc_cnt = msg.acc_cnt;
-        info.pcbng_cnt = msg.pcbng_cnt;
-        info.mx_usr_cnt = msg.mx_usr_cnt;
+            info.perc = msg.perc;
+            info.usr_cnt = msg.usr_cnt;
+            info.acc_cnt = msg.acc_cnt;
+            info.pcbng_cnt = msg.pcbng_cnt;
+            info.mx_usr_cnt = msg.mx_usr_cnt;
+        }
+
+        let pkt = self.new_server_list_pkt();
+        for id in self.broadcast(pkt, svr) {
+            svr.disconnect(id);
+        }
     }
 
-    fn send_server_list(&self, id: u32, svr: &Server) -> Result<(), Error> {
+    fn new_server_list_pkt(&self) -> Packet {
         let mut list = ServerList::new(self.gs_map.len() as u16);
 
         for (_, info) in self.gs_map.iter() {
             list.add(info.svr_code, info.load());
         }
 
-        svr.post_packet(id, list.to_packet())
+        list.to_packet()
+    }
+
+    fn send_server_list(&mut self, id: u32, svr: &Server) -> Result<(), Error> {
+        svr.post_packet(id, self.new_server_list_pkt())
     }
 }

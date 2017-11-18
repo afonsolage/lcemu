@@ -8,7 +8,7 @@ pub enum PacketError {
     BufferTooSmall,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Packet {
     kind: u8,
     sz: u16,
