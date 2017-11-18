@@ -137,8 +137,9 @@ impl<'a> Server {
     }
 
     pub fn post_packet(&self, id: u32, pkt: Packet) -> Result<(), Error> {
+        println!("Sending: {} to TcpSession: {}", pkt, id);
         let mut buf = vec![0u8; pkt.len()];
-        
+
         match pkt.serialize(&mut buf) {
             Err(why) => {
                 println!(
@@ -282,10 +283,8 @@ impl<'a> Server {
                 };
 
                 session.send(&buf).ok();
-            },
-            SessionEvent::RequestDisconnect(ref id) => {
-                
             }
+            SessionEvent::RequestDisconnect(ref id) => {}
         };
     }
 }

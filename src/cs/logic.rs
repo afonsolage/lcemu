@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Instant, Duration};
 use config;
 use network::prelude::*;
 
@@ -11,6 +12,7 @@ struct GSInstance {
     pub acc_cnt: u16,
     pub pcbng_cnt: u16,
     pub mx_usr_cnt: u16,
+    pub last_info: Instant,
 }
 
 impl GSInstance {
@@ -19,6 +21,10 @@ impl GSInstance {
             0 => 0,
             _ => (self.usr_cnt / self.mx_usr_cnt) as u8,
         }
+    }
+
+    pub fn alive(&self) -> bool {
+        self.last_info.elapsed().as_secs() < 10
     }
 }
 
@@ -108,6 +114,7 @@ impl Handler {
                 acc_cnt: 0,
                 pcbng_cnt: 0,
                 mx_usr_cnt: 0,
+                last_info: Instant::now() - Duration::new(10, 0), //Creates a instance 10 seconds ago, which is the timeout of keep alive, so the instance is inited as "dead"
             };
 
             self.gs_map.insert(gs.svr_code, gs);
@@ -145,13 +152,10 @@ impl Handler {
 
         match svr.post_packet(id, res.to_packet()) {
             Err(_) => svr.disconnect(id),
-            _ => 
-                // match self.send_server_list(id, svr) {
-                //     Err(_) => svr.disconnect(id),
-                //     _ => Ok(()),
-                //} 
-                Ok(())
-            ,
+            _ => match self.send_server_list(id, svr) {
+                Err(_) => svr.disconnect(id),
+                _ => Ok(()),
+            },
         }.ok();
 
         self.clients.insert(id);
@@ -190,25 +194,41 @@ impl Handler {
             info.acc_cnt = msg.acc_cnt;
             info.pcbng_cnt = msg.pcbng_cnt;
             info.mx_usr_cnt = msg.mx_usr_cnt;
+            info.last_info = Instant::now();
         }
 
-        let pkt = self.new_server_list_pkt();
-        for id in self.broadcast(pkt, svr) {
-            svr.disconnect(id);
+        match self.new_server_list_pkt() {
+            None => (),
+            Some(pkt) => {
+                for id in self.broadcast(pkt, svr) {
+                    svr.disconnect(id).ok();
+                }
+            }
         }
     }
 
-    fn new_server_list_pkt(&self) -> Packet {
+    fn new_server_list_pkt(&self) -> Option<Packet> {
         let mut list = ServerList::new(self.gs_map.len() as u16);
 
+        let mut at_least_one = false;
         for (_, info) in self.gs_map.iter() {
-            list.add(info.svr_code, info.load());
+            if info.alive() {
+                list.add(info.svr_code, info.load());
+                at_least_one = true;
+            }
         }
 
-        list.to_packet()
+        if at_least_one {
+            Some(list.to_packet())
+        } else {
+            None
+        }
     }
 
     fn send_server_list(&mut self, id: u32, svr: &Server) -> Result<(), Error> {
-        svr.post_packet(id, self.new_server_list_pkt())
+        match self.new_server_list_pkt() {
+            None => Ok(()),
+            Some(pkt) => svr.post_packet(id, pkt),
+        }
     }
 }

@@ -123,15 +123,14 @@ impl TcpSession {
                         println!("Failed to read packet data: {:?}", why);
                         break;
                     }
-                    Ok(cnt) => {
-                        match tx.send(SessionEvent::PacketData(packet_buf[0..cnt].to_vec())) {
-                            Err(why) => {
-                                println!("Failed to send SessionEvent: {:?}", why);
-                                break;
-                            }
-                            _ => (),
+                    Ok(cnt) => match tx.send(SessionEvent::PacketData(packet_buf[0..cnt].to_vec()))
+                    {
+                        Err(why) => {
+                            println!("Failed to send SessionEvent: {:?}", why);
+                            break;
                         }
-                    }
+                        _ => (),
+                    },
                 },
             }
         }

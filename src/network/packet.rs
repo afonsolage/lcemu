@@ -56,7 +56,6 @@ impl Packet {
     pub fn from_protocol<T: Protocol>(msg: ProtoMsg, proto: &T) -> Packet {
         let (kind, code, subcode) = msg.parse();
         let len = proto.len();
-        println!("Proto len: {}", len);
         let mut v = vec![0; len as usize];
         proto.serialize(&mut v);
         Packet {
