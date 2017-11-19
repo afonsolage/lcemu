@@ -1,0 +1,22 @@
+[package]
+name = "mu-proto"
+version = "0.1.0"
+authors = ["Afonso Lage <lage.afonso@gmail.com>"]
+
+[dependencies]
+futures = "*"
+tokio-io = "*"
+tokio-core = "*"
+tokio-proto = "*"
+tokio-service = "*"
+bytes = "*"
+
+util = {path = "../util"}
+
+[[bin]]
+name = "test"
+path = "src/test/main.rs"
+
+[lib]
+name = "mu_proto"
+path = "src/lib.rs"

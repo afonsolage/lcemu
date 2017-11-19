@@ -3,5 +3,5 @@ members = [
     "bin/gs",
     "bin/cs",
     "lib/network",
-    "lib/anet",
+    "lib/mu-proto",
 ]

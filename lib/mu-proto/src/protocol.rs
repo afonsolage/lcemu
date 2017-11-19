@@ -1,6 +1,5 @@
 extern crate util;
 
-use super::Packet;
 use self::util::*;
 
 #[derive(Debug)]
@@ -33,7 +32,6 @@ impl ProtoMsg {
 pub trait Protocol {
     fn parse(&[u8]) -> Self;
     fn serialize(&self, &mut [u8]);
-    fn to_packet(&self) -> Packet;
     fn len(&self) -> u16;
 }
 
@@ -67,10 +65,6 @@ impl Protocol for ServerInfo {
         set_u16(&mut buf[9..11], self.mx_usr_cnt);
     }
 
-    fn to_packet(&self) -> Packet {
-        Packet::from_protocol(ProtoMsg::ServerInfo, self)
-    }
-
     fn len(&self) -> u16 {
         11
     }
@@ -91,10 +85,6 @@ impl Protocol for JoinServerStat {
         set_u32(&mut buf[0..2], self.queue_cnt);
     }
 
-    fn to_packet(&self) -> Packet {
-        Packet::from_protocol(ProtoMsg::JoinServerStat, self)
-    }
-
     fn len(&self) -> u16 {
         4
     }
@@ -111,10 +101,6 @@ impl Protocol for ConnectResult {
 
     fn serialize(&self, buf: &mut [u8]) {
         buf[0] = self.res;
-    }
-
-    fn to_packet(&self) -> Packet {
-        Packet::from_protocol(ProtoMsg::ConnectResult, self)
     }
 
     fn len(&self) -> u16 {
@@ -156,10 +142,6 @@ impl Protocol for ServerList {
 
             i += 4;
         }
-    }
-
-    fn to_packet(&self) -> Packet {
-        Packet::from_protocol(ProtoMsg::ServerList, self)
     }
 
     fn len(&self) -> u16 {
