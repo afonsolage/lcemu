@@ -1,9 +1,8 @@
 [[package]]
-name = "Nostalgic"
+name = "anet"
 version = "0.1.0"
 dependencies = [
- "config 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "scheduled-executor 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio 0.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -112,6 +111,24 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "lccs"
+version = "0.1.0"
+dependencies = [
+ "config 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "network 0.1.0",
+ "scheduled-executor 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "lcgs"
+version = "0.1.0"
+dependencies = [
+ "config 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "network 0.1.0",
+ "scheduled-executor 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -169,6 +186,10 @@ dependencies = [
  "winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "ws2_32-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "network"
+version = "0.1.0"
 
 [[package]]
 name = "nom"
@@ -231,6 +252,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "slab"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "tokio"
+version = "0.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -321,6 +347,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum serde_json 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)" = "e4586746d1974a030c48919731ecffd0ed28d0c40749d0d18d43b3a7d6c9b20e"
 "checksum slab 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "17b4fcaed89ab08ef143da37bc52adbcc04d4a69014f4c1208d6b51f0c47bc23"
 "checksum slab 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fdeff4cd9ecff59ec7e3744cbca73dfe5ac35c2aedb2cfba8a1c715a18912e9d"
+"checksum tokio 0.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ad008a2129866117d3b0424c047f1302f3d8974ff58c6ade59ec14cd6c59fee2"
 "checksum tokio-core 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)" = "c843a027f7c1df5f81e7734a0df3f67bf329411781ebf36393ce67beef6071e3"
 "checksum tokio-io 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "514aae203178929dbf03318ad7c683126672d4d96eccb77b29603d33c9e25743"
 "checksum toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a7540f4ffc193e0d3c94121edb19b055670d369f77d5804db11ae053a45b6e7e"

@@ -1,3 +1,4 @@
+use std::sync::mpsc::{channel, Sender, Receiver};
 use std::collections::{HashMap, HashSet};
 use std::time::{Instant, Duration};
 use config;
@@ -13,6 +14,11 @@ struct GSInstance {
     pub pcbng_cnt: u16,
     pub mx_usr_cnt: u16,
     pub last_info: Instant,
+}
+
+enum LogicEvent {
+    CheckInstanceTimeout,
+    NetEvent(Event),
 }
 
 impl GSInstance {
@@ -31,13 +37,18 @@ impl GSInstance {
 pub struct Handler {
     gs_map: HashMap<u16, GSInstance>,
     clients: HashSet<u32>,
+    tx: Sender<LogicEvent>,
+    rx: Receiver<LogicEvent>,
 }
 
 impl Handler {
     pub fn new() -> Handler {
+        let (tx, rx): (Sender<LogicEvent>, Receiver<LogicEvent>) = channel();
         Handler {
             gs_map: HashMap::new(),
             clients: HashSet::new(),
+            rx: rx,
+            tx: tx,
         }
     }
 
@@ -127,7 +138,11 @@ impl Handler {
         }
     }
 
-    pub fn handle(&mut self, evt: Event, svr: &Server) {
+    pub fn start(&self, svr: Server) {
+
+    }
+
+    pub fn handle_net_event(&mut self, evt: Event, svr: &Server) {
         match evt {
             Event::ClientConnected(id) => self.on_client_connected(id, svr),
             Event::ClientDisconnected(id) => self.on_client_disconnected(id, svr),
@@ -210,19 +225,17 @@ impl Handler {
     fn new_server_list_pkt(&self) -> Option<Packet> {
         let mut list = ServerList::new(self.gs_map.len() as u16);
 
-        let mut at_least_one = false;
+        let mut cnt = 0;
         for (_, info) in self.gs_map.iter() {
             if info.alive() {
                 list.add(info.svr_code, info.load());
-                at_least_one = true;
+                cnt += 1;
             }
         }
 
-        if at_least_one {
-            Some(list.to_packet())
-        } else {
-            None
-        }
+        list.cnt = cnt;
+
+        Some(list.to_packet())
     }
 
     fn send_server_list(&mut self, id: u32, svr: &Server) -> Result<(), Error> {

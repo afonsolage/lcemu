@@ -121,7 +121,7 @@ impl Protocol for ConnectResult {
 }
 
 pub struct ServerList {
-    cnt: u16,
+    pub cnt: u16,
     data: Vec<(u16, u8)>,
 }
 

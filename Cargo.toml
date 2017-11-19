@@ -1,20 +1,7 @@
-[package]
-name = "Nostalgic"
-version = "0.1.0"
-authors = ["Afonso Lage <lage.afonso@gmail.com>"]
-
-[dependencies]
-scheduled-executor = "*"
-config = "*"
-
-[lib]
-name = "network"
-path = "src/network/lib.rs"
-
-[[bin]]
-name = "cs"
-path = "src/cs/main.rs"
-
-[[bin]]
-name = "gs"
-path = "src/gs/main.rs"
+[workspace]
+members = [
+    "bin/gs",
+    "bin/cs",
+    "lib/network",
+    "lib/anet",
+]

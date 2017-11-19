@@ -16,10 +16,7 @@ fn main() {
 
     let mut handler = logic::Handler::new();
     handler.setup(&settings);
-
-    for packet in &server {
-        handler.handle(packet, &server);
-    }
+    handler.start(server);
 }
 
 fn setup_networking(settings: &config::Config) -> Server {

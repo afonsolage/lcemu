@@ -1,0 +1,9 @@
+[package]
+name = "lccs"
+version = "0.1.0"
+authors = ["Afonso Lage <lage.afonso@gmail.com>"]
+
+[dependencies]
+scheduled-executor = "*"
+config = "*"
+network = { path = "../../lib/network" }
