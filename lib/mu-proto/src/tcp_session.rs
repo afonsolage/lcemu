@@ -9,7 +9,7 @@ use self::futures::{Async, AsyncSink, Poll, Sink, StartSend, Stream};
 use std::io;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum TcpSessionError {
     TcpStreamRead,
     TcpStreamWrite,
     TcpStreamFlush,
@@ -35,14 +35,14 @@ where
     T: AsyncRead,
 {
     type Item = MuPacket;
-    type Error = Error;
+    type Error = TcpSessionError;
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         match self.io.read(&mut self.buf) {
             Err(e) => if e.kind() == io::ErrorKind::WouldBlock {
                 return Ok(Async::NotReady);
             } else {
                 println!("IO Read Error: {:?}", e);
-                return Err(Error::TcpStreamRead);
+                return Err(TcpSessionError::TcpStreamRead);
             },
             Ok(0) => Ok(Async::Ready(None)),
             Ok(n) => return Ok(Async::Ready(Some(MuPacket::new(&self.buf[0..n])))),
@@ -55,13 +55,13 @@ where
     T: AsyncWrite,
 {
     type SinkItem = MuPacket;
-    type SinkError = Error;
+    type SinkError = TcpSessionError;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         let mut buf = vec![0; item.len()];
 
         match item.serialize(&mut buf) {
-            Err(_) => return Err(Error::SerializationError),
+            Err(_) => return Err(TcpSessionError::SerializationError),
             Ok(_) => (),
         };
 
@@ -69,7 +69,7 @@ where
             Err(e) => if e.kind() == io::ErrorKind::WouldBlock {
                 return Ok(AsyncSink::NotReady(item));
             } else {
-                return Err(Error::TcpStreamWrite);
+                return Err(TcpSessionError::TcpStreamWrite);
             },
             Ok(_) => {
                 return Ok(AsyncSink::Ready);
@@ -82,7 +82,7 @@ where
             Err(e) => if e.kind() == io::ErrorKind::WouldBlock {
                 return Ok(Async::NotReady);
             } else {
-                return Err(Error::TcpStreamFlush);
+                return Err(TcpSessionError::TcpStreamFlush);
             },
             Ok(()) => {
                 return Ok(Async::Ready(()));

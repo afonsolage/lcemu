@@ -10,6 +10,7 @@ tokio-core = "*"
 tokio-proto = "*"
 tokio-service = "*"
 bytes = "*"
+futures-await = "*"
 
 util = {path = "../util"}
 
