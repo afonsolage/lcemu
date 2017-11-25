@@ -32,7 +32,7 @@ impl ProtoMsg {
 pub trait Protocol {
     fn parse(&[u8]) -> Self;
     fn serialize(&self, &mut [u8]);
-    fn len(&self) -> u16;
+    fn size(&self) -> u16;
 }
 
 pub struct ServerInfo {
@@ -65,7 +65,7 @@ impl Protocol for ServerInfo {
         set_u16(&mut buf[9..11], self.mx_usr_cnt);
     }
 
-    fn len(&self) -> u16 {
+    fn size(&self) -> u16 {
         11
     }
 }
@@ -85,7 +85,7 @@ impl Protocol for JoinServerStat {
         set_u32(&mut buf[0..2], self.queue_cnt);
     }
 
-    fn len(&self) -> u16 {
+    fn size(&self) -> u16 {
         4
     }
 }
@@ -103,7 +103,7 @@ impl Protocol for ConnectResult {
         buf[0] = self.res;
     }
 
-    fn len(&self) -> u16 {
+    fn size(&self) -> u16 {
         1
     }
 }
@@ -135,7 +135,7 @@ impl Protocol for ServerList {
         set_u16(&mut buf[0..2], self.cnt);
 
         let mut i = 2;
-        for &(idx, load) in self.data.iter() {
+        for &(idx, load) in &self.data {
             set_u16(&mut buf[i..i + 2], idx); //The range end is exclusive.
             buf[i + 2] = load;
             buf[i + 3] = 0xFF; //Unkown data.
@@ -144,7 +144,7 @@ impl Protocol for ServerList {
         }
     }
 
-    fn len(&self) -> u16 {
+    fn size(&self) -> u16 {
         2 + (self.data.len() * 4) as u16 //The size of each item is 4, because there is a fixed byte (0xCC)
     }
 }

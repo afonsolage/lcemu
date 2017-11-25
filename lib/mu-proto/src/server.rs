@@ -21,7 +21,10 @@ use std::collections::HashMap;
 use super::tcp_session::{TcpSessionError, TcpSession, TcpSessionReader};
 use super::packet::MuPacket;
 
+static SESSION_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
 pub enum NetworkError {
+    None,
     InvalidAddress,
     TcpBindError,
     Disconnected,
@@ -41,6 +44,11 @@ impl From<io::Error> for NetworkError {
     }
 }
 
+impl From<()> for NetworkError {
+    fn from(_: ()) -> Self {
+        NetworkError::None
+    }
+}
 
 impl From<TcpSessionError> for NetworkError {
     fn from(err: TcpSessionError) -> Self {
@@ -50,7 +58,43 @@ impl From<TcpSessionError> for NetworkError {
     }
 }
 
-type ClientsMap = Arc<Mutex<HashMap<u32, f_mpsc::Sender<MuPacket>>>>;
+#[derive(Debug)]
+pub enum NetworkEvent {
+    ClientConnected(SessionRef),
+    ClientPacket((SessionRef, MuPacket)),
+    ClientDisconnected(u32),
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionRef {
+    pub id: u32,
+    tx: f_mpsc::Sender<MuPacket>,
+}
+
+impl SessionRef {
+    pub fn new(id: u32, tx: f_mpsc::Sender<MuPacket>) -> Self {
+        SessionRef { id: id, tx: tx }
+    }
+
+    pub fn close(&mut self) -> Result<(), NetworkError> {
+        self.send(MuPacket::empty())
+    }
+
+    pub fn send(&mut self, pkt: MuPacket) -> Result<(), NetworkError> {
+        match self.tx.try_send(pkt) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                if err.is_disconnected() {
+                    Err(NetworkError::SessionDisconnected)
+                } else {
+                    Err(NetworkError::SessionSendError)
+                }
+            }
+        }
+    }
+}
+
+type ClientsMap = Arc<Mutex<HashMap<u32, SessionRef>>>;
 
 pub struct Server {
     handle: Handle,
@@ -59,15 +103,6 @@ pub struct Server {
     task: Arc<Mutex<Option<Task>>>,
     clients: ClientsMap,
 }
-
-#[derive(Debug)]
-pub enum NetworkEvent {
-    ClientConnected(u32),
-    ClientDisconnected(u32),
-    ClientPacket((u32, MuPacket)),
-}
-
-static SESSION_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 impl<'a> Server {
     pub fn new(handle: Handle) -> Server {
@@ -98,9 +133,9 @@ impl<'a> Server {
             Server::handle_tcp_connections(
                 listener,
                 self.evt_tx.clone(),
-                self.task.clone(),
+                Arc::clone(&self.task),
                 self.handle.clone(),
-                self.clients.clone(),
+                Arc::clone(&self.clients),
             ).then(|_| Ok(())),
         );
 
@@ -110,17 +145,8 @@ impl<'a> Server {
     pub fn send(&self, id: u32, pkt: MuPacket) -> Result<(), NetworkError> {
         let mut map = self.clients.lock().unwrap();
 
-        if let Some(tx) = map.get_mut(&id) {
-            match tx.try_send(pkt) {
-                Ok(_) => Ok(()),
-                Err(err) => {
-                    if err.is_disconnected() {
-                        Err(NetworkError::SessionDisconnected)
-                    } else {
-                        Err(NetworkError::SessionSendError)
-                    }
-                }
-            }
+        if let Some(s_ref) = map.get_mut(&id) {
+            s_ref.send(pkt)
         } else {
             Err(NetworkError::SessionNotFound)
         }
@@ -138,9 +164,20 @@ impl<'a> Server {
         #[async]
         for (stream, _peer_addr) in listener.incoming() {
             let id = SESSION_ID_COUNTER.fetch_add(1, Ordering::Relaxed) as u32;
-            let (ssn_reader, ssn_writer) = TcpSession::new(stream, id);
+            let (ssn_reader, ssn_writer) = TcpSession::new_pair(stream, id);
+            let (s_tx, s_rx): (f_mpsc::Sender<MuPacket>, f_mpsc::Receiver<MuPacket>) =
+                f_mpsc::channel(100);
 
-            if let Ok(_) = tx.send(NetworkEvent::ClientConnected(id)) {
+            let s_ref = SessionRef::new(id, s_tx.clone());
+
+            {
+                let mut map = clients.lock().unwrap();
+                map.insert(id, s_ref.clone());
+            }
+
+            if tx.send(NetworkEvent::ClientConnected(s_ref.clone()))
+                .is_ok()
+            {
                 if let Some(ref t) = *task_shr.lock().unwrap() {
                     t.notify();
                 }
@@ -149,27 +186,21 @@ impl<'a> Server {
                 return Ok(());
             }
 
-            {
-                let (tx, rx): (f_mpsc::Sender<MuPacket>,
-                               f_mpsc::Receiver<MuPacket>) = f_mpsc::channel(100);
 
-                let mut map = clients.lock().unwrap();
 
-                map.insert(id, tx);
+            let ft = ssn_writer
+                .send_all(s_rx.map_err(|_| TcpSessionError::TcpStreamWrite))
+                .then(|_| Ok(()));
 
-                let ft = ssn_writer
-                    .send_all(rx.map_err(|_| TcpSessionError::TcpStreamWrite))
-                    .then(|_| Ok(()));
-
-                handle.spawn(ft);
-            }
+            handle.spawn(ft);
 
             handle.spawn(
                 Server::handle_tcp_session(
                     ssn_reader,
                     tx.clone(),
-                    task_shr.clone(),
-                    clients.clone(),
+                    Arc::clone(&task_shr),
+                    Arc::clone(&clients),
+                    s_ref.clone(),
                 ).then(|_| Ok(())),
             )
         }
@@ -183,15 +214,16 @@ impl<'a> Server {
         tx: Sender<NetworkEvent>,
         task_shr: Arc<Mutex<Option<Task>>>,
         clients: ClientsMap,
+        s_ref: SessionRef,
     ) -> Result<(), NetworkError> {
 
-        let task_shr_cs = task_shr.clone();
-        let session_id = ssn_reader.id;
+        let task_shr_cs = Arc::clone(&task_shr);
+        let s_ref_cj = s_ref.clone();
 
         #[async]
         for packet in ssn_reader {
             let task = task_shr_cs.lock().unwrap();
-            if let Ok(_) = tx.send(NetworkEvent::ClientPacket((session_id, packet))) {
+            if tx.send(NetworkEvent::ClientPacket((s_ref_cj.clone(), packet))).is_ok() {
                 if let Some(ref t) = *task {
                     t.notify();
                 }
@@ -201,13 +233,15 @@ impl<'a> Server {
             }
         }
 
+        let session_id = s_ref.id;
+
         {
             let mut map = clients.lock().unwrap();
             map.remove(&session_id);
         }
 
         let task = task_shr.lock().unwrap();
-        if let Ok(_) = tx.send(NetworkEvent::ClientDisconnected(session_id)) {
+        if tx.send(NetworkEvent::ClientDisconnected(session_id)).is_ok() {
             if let Some(ref t) = *task {
                 t.notify();
             }

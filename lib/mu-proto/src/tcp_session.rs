@@ -17,6 +17,7 @@ pub enum TcpSessionError {
     TcpStreamWrite,
     TcpStreamFlush,
     SerializationError,
+    Closed,
 }
 
 pub struct TcpSession<T> {
@@ -26,7 +27,7 @@ pub struct TcpSession<T> {
 pub struct TcpSessionReader<T> {
     io: T,
     pub id: u32,
-    buf: [u8; 10240]
+    buf: [u8; 10_240]
 }
 
 pub struct TcpSessionWriter<T> {
@@ -38,10 +39,10 @@ impl<T> TcpSession<T>
 where
     T: AsyncRead + AsyncWrite,
 {
-    pub fn new(io: T, id: u32) -> (TcpSessionReader<ReadHalf<T>>, TcpSessionWriter<WriteHalf<T>>) {
+    pub fn new_pair(io: T, id: u32) -> (TcpSessionReader<ReadHalf<T>>, TcpSessionWriter<WriteHalf<T>>) {
         let (r, w) = io.split();
         (
-            TcpSessionReader { io: r, id: id, buf: [0; 10240] },
+            TcpSessionReader { io: r, id: id, buf: [0; 10_240] },
             TcpSessionWriter { io: w, id: id },
         )
     }
@@ -57,14 +58,14 @@ where
         match self.io.read(&mut self.buf) {
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {
-                    return Ok(Async::NotReady);
+                    Ok(Async::NotReady)
                 } else {
                     println!("IO Read Error: {:?}", e);
-                    return Err(TcpSessionError::TcpStreamRead);
+                    Err(TcpSessionError::TcpStreamRead)
                 }
             }
             Ok(0) => Ok(Async::Ready(None)),
-            Ok(n) => return Ok(Async::Ready(MuPacket::new(&self.buf[0..n]))),
+            Ok(n) => Ok(Async::Ready(MuPacket::new(&self.buf[0..n]))),
         }
     }
 }
@@ -77,23 +78,26 @@ where
     type SinkError = TcpSessionError;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        if item.is_empty() {
+            return Err(TcpSessionError::Closed);
+        }
+
         let mut buf = vec![0; item.len()];
 
-        match item.serialize(&mut buf) {
-            Err(_) => return Err(TcpSessionError::SerializationError),
-            Ok(_) => (),
-        };
+        if item.serialize(&mut buf).is_err() {
+            return Err(TcpSessionError::SerializationError);
+        }
 
         match self.io.write(&buf) {
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {
-                    return Ok(AsyncSink::NotReady(item));
+                    Ok(AsyncSink::NotReady(item))
                 } else {
-                    return Err(TcpSessionError::TcpStreamWrite);
+                    Err(TcpSessionError::TcpStreamWrite)
                 }
             }
             Ok(_) => {
-                return Ok(AsyncSink::Ready);
+                Ok(AsyncSink::Ready)
             }
         }
     }
@@ -102,13 +106,13 @@ where
         match self.io.flush() {
             Err(e) => {
                 if e.kind() == io::ErrorKind::WouldBlock {
-                    return Ok(Async::NotReady);
+                    Ok(Async::NotReady)
                 } else {
-                    return Err(TcpSessionError::TcpStreamFlush);
+                    Err(TcpSessionError::TcpStreamFlush)
                 }
             }
             Ok(()) => {
-                return Ok(Async::Ready(()));
+                Ok(Async::Ready(()))
             }
         }
     }

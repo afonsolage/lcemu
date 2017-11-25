@@ -18,8 +18,14 @@ pub struct MuPacket {
 }
 
 impl MuPacket {
-    fn has_sub_code(code: &u8) -> bool {
-        SUB_CODE_PKTS.contains(code)
+    pub fn empty() -> MuPacket {
+        MuPacket {
+            kind: 0xFF,
+            sz: 0,
+            code: 0,
+            sub_code: 0,
+            data: vec![],
+        }
     }
 
     pub fn new(buffer: &[u8]) -> Option<MuPacket> {
@@ -28,8 +34,8 @@ impl MuPacket {
         let mut n = 1;
 
         let sz = match kind {
-            0xC1 => buffer[n] as u16,
-            0xC2 => ((buffer[n] as u16) << 8) | buffer[n + 1] as u16,
+            0xC1 => u16::from(buffer[n]),
+            0xC2 => ((u16::from(buffer[n])) << 8) | u16::from(buffer[n + 1]),
             _ => {
                 println!("Unkown header received: {:02X}", kind);
                 return None;
@@ -56,9 +62,17 @@ impl MuPacket {
         })
     }
 
-    pub fn from_protocol<T: Protocol>(msg: ProtoMsg, proto: &T) -> MuPacket {
+    fn has_sub_code(code: &u8) -> bool {
+        SUB_CODE_PKTS.contains(code)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.kind == 0xFF
+    }
+
+    pub fn from_protocol<T: Protocol>(msg: &ProtoMsg, proto: &T) -> MuPacket {
         let (kind, code, subcode) = msg.parse();
-        let len = proto.len();
+        let len = proto.size();
         let mut v = vec![0; len as usize];
         proto.serialize(&mut v);
         MuPacket {
@@ -77,7 +91,7 @@ impl MuPacket {
             _ => panic!("Unsupported!"),
         };
 
-        if MuPacket::has_sub_code(&code) {
+        if MuPacket::has_sub_code(code) {
             res + 2
         } else {
             res + 1
@@ -85,7 +99,7 @@ impl MuPacket {
     }
 
     pub fn len(&self) -> usize {
-        return MuPacket::header_len(&self.kind, &self.code) as usize + self.data.len();
+        MuPacket::header_len(&self.kind, &self.code) as usize + self.data.len()
     }
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, MuPacketError> {
