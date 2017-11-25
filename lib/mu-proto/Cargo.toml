@@ -11,6 +11,8 @@ tokio-proto = "*"
 tokio-service = "*"
 bytes = "*"
 futures-await = "*"
+failure = "*"
+failure_derive = "*"
 
 util = {path = "../util"}
 

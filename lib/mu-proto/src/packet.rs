@@ -3,8 +3,11 @@ use protocol::Protocol;
 use protocol::ProtoMsg;
 use protocol::SUB_CODE_PKTS;
 
-#[derive(Debug)]
+use failure::Error;
+
+#[derive(Debug, Fail)]
 pub enum MuPacketError {
+    #[fail(display = "The given buffer is too small to create the packet.")]
     BufferTooSmall,
 }
 
@@ -102,9 +105,9 @@ impl MuPacket {
         MuPacket::header_len(&self.kind, &self.code) as usize + self.data.len()
     }
 
-    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, MuPacketError> {
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, Error> {
         if buf.len() < self.len() {
-            return Err(MuPacketError::BufferTooSmall);
+            return Err(MuPacketError::BufferTooSmall)?;
         }
 
         let mut idx = 0;

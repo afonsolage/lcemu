@@ -6,6 +6,8 @@ use futures::task::Task;
 use futures::task;
 use futures::sync::mpsc as f_mpsc;
 
+use failure::Error;
+
 use self::tokio_core::net::{TcpListener, TcpStream};
 use self::tokio_core::reactor::Handle;
 use self::tokio_io::io::ReadHalf;
@@ -14,48 +16,40 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::mpsc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::io;
 use std::convert::From;
 use std::collections::HashMap;
+use std::net::AddrParseError;
 
 use super::tcp_session::{TcpSessionError, TcpSession, TcpSessionReader};
 use super::packet::MuPacket;
 
 static SESSION_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
+#[derive(Debug, Fail)]
 pub enum NetworkError {
+    #[fail(display = "You shouldn't see this.")]
     None,
+    #[fail(display = "Invalid network address provided.")]
     InvalidAddress,
+    #[fail(display = "Failed to bind on TCP address and port")]
     TcpBindError,
-    UdpBindError,
+    #[fail(display = "Endpoint was disconnected")]
     Disconnected,
+    #[fail(display = "Failed to write on TX channel")]
     TxFailed,
+    #[fail(display = "General IO Error")]
     IoErrror,
-    SessionError,
+    #[fail(display = "Given session was not found")]
     SessionNotFound,
+    #[fail(display = "Failed to send packet to given session")]
     SessionSendError,
+    #[fail(display = "Session was disconnected")]
     SessionDisconnected,
 }
 
-impl From<io::Error> for NetworkError {
-    fn from(err: io::Error) -> Self {
-        match err {
-            _ => NetworkError::IoErrror,
-        }
-    }
-}
-
-impl From<()> for NetworkError {
-    fn from(_: ()) -> Self {
-        NetworkError::None
-    }
-}
-
-impl From<TcpSessionError> for NetworkError {
-    fn from(err: TcpSessionError) -> Self {
-        match err {
-            _ => NetworkError::SessionError,
-        }
+impl From<AddrParseError> for NetworkError {
+    fn from(err: AddrParseError) -> NetworkError {
+        NetworkError::InvalidAddress
     }
 }
 
@@ -130,10 +124,7 @@ impl<'a> Server {
 
     pub fn start_tcp(&mut self, listen_addr: &'a str, port: u16) -> Result<(), NetworkError> {
         let handle = self.handle.clone();
-        let addr = match format!("{}:{}", listen_addr, port).parse() {
-            Err(_) => return Err(NetworkError::InvalidAddress),
-            Ok(addr) => addr,
-        };
+        let addr = format!("{}:{}", listen_addr, port).parse()?;
 
         println!("Binding TCP on {:?}", addr);
 
@@ -163,7 +154,7 @@ impl<'a> Server {
         task_shr: Arc<Mutex<Option<Task>>>,
         handle: Handle,
         clients: ClientsMap,
-    ) -> Result<(), NetworkError> {
+    ) -> Result<(), Error> {
 
         #[async]
         for (stream, _peer_addr) in listener.incoming() {
@@ -219,7 +210,7 @@ impl<'a> Server {
         task_shr: Arc<Mutex<Option<Task>>>,
         clients: ClientsMap,
         s_ref: SessionRef,
-    ) -> Result<(), NetworkError> {
+    ) -> Result<(), Error> {
 
         let task_shr_cs = Arc::clone(&task_shr);
         let s_ref_cj = s_ref.clone();
@@ -264,7 +255,7 @@ impl<'a> Server {
 
 impl Stream for Server {
     type Item = NetworkEvent;
-    type Error = NetworkError;
+    type Error = Error;
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         {
             let mut task = self.task.lock().unwrap();

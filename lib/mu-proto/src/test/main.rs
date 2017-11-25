@@ -3,7 +3,7 @@ extern crate tokio_core;
 extern crate futures;
 
 use futures::stream::Stream;
-use self::tokio_core::reactor::{Core, Handle};
+use self::tokio_core::reactor::Core;
 use mu_proto::Server;
 use mu_proto::NetworkEvent;
 use mu_proto::MuPacket;
@@ -32,5 +32,5 @@ fn main() {
         Ok(())
     });
 
-    reactor.run(svr_ft);
+    reactor.run(svr_ft).ok();
 }

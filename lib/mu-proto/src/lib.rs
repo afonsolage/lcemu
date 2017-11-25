@@ -4,6 +4,9 @@
 #![cfg_attr(feature="clippy", feature(plugin))]
 #![cfg_attr(feature="clippy", plugin(clippy))]
 
+extern crate failure;
+#[macro_use] extern crate failure_derive;
+
 extern crate futures_await as futures;
 
 mod server;
