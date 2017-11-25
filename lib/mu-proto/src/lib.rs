@@ -1,4 +1,5 @@
 #![feature(proc_macro, conservative_impl_trait, generators)]
+#![feature(const_atomic_usize_new)]
 extern crate futures_await as futures;
 
 mod server;

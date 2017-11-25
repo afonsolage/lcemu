@@ -4,9 +4,12 @@ extern crate tokio_io;
 
 use super::MuPacket;
 use self::tokio_io::{AsyncRead, AsyncWrite};
+use self::tokio_io::io::{ReadHalf, WriteHalf};
 use self::futures::{Async, AsyncSink, Poll, Sink, StartSend, Stream};
 
 use std::io;
+use std::io::{Read, Write};
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub enum TcpSessionError {
@@ -17,20 +20,34 @@ pub enum TcpSessionError {
 }
 
 pub struct TcpSession<T> {
-    io: T,
-    buf: [u8; 65536],
+    _io: PhantomData<T>,
 }
 
-impl<T> TcpSession<T> where T: AsyncRead + AsyncWrite {
-    pub fn new(io: T) -> Self {
-        TcpSession {
-            io: io,
-            buf: [0; 65536],
-        }
+pub struct TcpSessionReader<T> {
+    io: T,
+    pub id: u32,
+    buf: [u8; 10240]
+}
+
+pub struct TcpSessionWriter<T> {
+    io: T,
+    pub id: u32,
+}
+
+impl<T> TcpSession<T>
+where
+    T: AsyncRead + AsyncWrite,
+{
+    pub fn new(io: T, id: u32) -> (TcpSessionReader<ReadHalf<T>>, TcpSessionWriter<WriteHalf<T>>) {
+        let (r, w) = io.split();
+        (
+            TcpSessionReader { io: r, id: id, buf: [0; 10240] },
+            TcpSessionWriter { io: w, id: id },
+        )
     }
 }
 
-impl<T> Stream for TcpSession<T>
+impl<T> Stream for TcpSessionReader<ReadHalf<T>>
 where
     T: AsyncRead,
 {
@@ -38,19 +55,21 @@ where
     type Error = TcpSessionError;
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         match self.io.read(&mut self.buf) {
-            Err(e) => if e.kind() == io::ErrorKind::WouldBlock {
-                return Ok(Async::NotReady);
-            } else {
-                println!("IO Read Error: {:?}", e);
-                return Err(TcpSessionError::TcpStreamRead);
-            },
+            Err(e) => {
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    return Ok(Async::NotReady);
+                } else {
+                    println!("IO Read Error: {:?}", e);
+                    return Err(TcpSessionError::TcpStreamRead);
+                }
+            }
             Ok(0) => Ok(Async::Ready(None)),
             Ok(n) => return Ok(Async::Ready(Some(MuPacket::new(&self.buf[0..n])))),
         }
     }
 }
 
-impl<T> Sink for TcpSession<T>
+impl<T> Sink for TcpSessionWriter<WriteHalf<T>>
 where
     T: AsyncWrite,
 {
@@ -66,11 +85,13 @@ where
         };
 
         match self.io.write(&buf) {
-            Err(e) => if e.kind() == io::ErrorKind::WouldBlock {
-                return Ok(AsyncSink::NotReady(item));
-            } else {
-                return Err(TcpSessionError::TcpStreamWrite);
-            },
+            Err(e) => {
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    return Ok(AsyncSink::NotReady(item));
+                } else {
+                    return Err(TcpSessionError::TcpStreamWrite);
+                }
+            }
             Ok(_) => {
                 return Ok(AsyncSink::Ready);
             }
@@ -79,11 +100,13 @@ where
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
         match self.io.flush() {
-            Err(e) => if e.kind() == io::ErrorKind::WouldBlock {
-                return Ok(Async::NotReady);
-            } else {
-                return Err(TcpSessionError::TcpStreamFlush);
-            },
+            Err(e) => {
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    return Ok(Async::NotReady);
+                } else {
+                    return Err(TcpSessionError::TcpStreamFlush);
+                }
+            }
             Ok(()) => {
                 return Ok(Async::Ready(()));
             }
