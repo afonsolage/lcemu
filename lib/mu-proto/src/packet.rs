@@ -22,7 +22,7 @@ impl MuPacket {
         SUB_CODE_PKTS.contains(code)
     }
 
-    pub fn new(buffer: &[u8]) -> MuPacket {
+    pub fn new(buffer: &[u8]) -> Option<MuPacket> {
         let kind = buffer[0];
 
         let mut n = 1;
@@ -30,7 +30,10 @@ impl MuPacket {
         let sz = match kind {
             0xC1 => buffer[n] as u16,
             0xC2 => ((buffer[n] as u16) << 8) | buffer[n + 1] as u16,
-            _ => panic!("Unsupported!"),
+            _ => {
+                println!("Unkown header received: {:02X}", kind);
+                return None;
+            },
         };
 
         n += if kind == 0xC1 { 1 } else { 2 };
@@ -44,13 +47,13 @@ impl MuPacket {
             n += 1;
         }
 
-        MuPacket {
+        Some(MuPacket {
             kind: kind,
             sz: sz,
             code: code,
             sub_code: sub_code,
             data: buffer[n..].to_vec(),
-        }
+        })
     }
 
     pub fn from_protocol<T: Protocol>(msg: ProtoMsg, proto: &T) -> MuPacket {

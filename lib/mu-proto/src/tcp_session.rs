@@ -64,7 +64,7 @@ where
                 }
             }
             Ok(0) => Ok(Async::Ready(None)),
-            Ok(n) => return Ok(Async::Ready(Some(MuPacket::new(&self.buf[0..n])))),
+            Ok(n) => return Ok(Async::Ready(MuPacket::new(&self.buf[0..n]))),
         }
     }
 }

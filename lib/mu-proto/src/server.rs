@@ -28,6 +28,9 @@ pub enum NetworkError {
     TxFailed,
     IoErrror,
     SessionError,
+    SessionNotFound,
+    SessionSendError,
+    SessionDisconnected,
 }
 
 impl From<io::Error> for NetworkError {
@@ -102,6 +105,25 @@ impl<'a> Server {
         );
 
         Ok(())
+    }
+
+    pub fn send(&self, id: u32, pkt: MuPacket) -> Result<(), NetworkError> {
+        let mut map = self.clients.lock().unwrap();
+
+        if let Some(tx) = map.get_mut(&id) {
+            match tx.try_send(pkt) {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    if err.is_disconnected() {
+                        Err(NetworkError::SessionDisconnected)
+                    } else {
+                        Err(NetworkError::SessionSendError)
+                    }
+                }
+            }
+        } else {
+            Err(NetworkError::SessionNotFound)
+        }
     }
 
     #[async]
