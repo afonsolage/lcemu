@@ -11,7 +11,6 @@ tokio-proto = "*"
 tokio-service = "*"
 bytes = "*"
 futures-await = "*"
-clippy = {version = "*", optional = true}
 
 util = {path = "../util"}
 

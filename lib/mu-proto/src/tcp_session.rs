@@ -84,7 +84,7 @@ where
 
         let mut buf = vec![0; item.len()];
 
-        if item.serialize(&mut buf).is_err() {
+        if let Err(_) = item.serialize(&mut buf) {
             return Err(TcpSessionError::SerializationError);
         }
 

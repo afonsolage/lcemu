@@ -27,6 +27,7 @@ pub enum NetworkError {
     None,
     InvalidAddress,
     TcpBindError,
+    UdpBindError,
     Disconnected,
     TxFailed,
     IoErrror,
@@ -117,12 +118,24 @@ impl<'a> Server {
         }
     }
 
+    pub fn send(&self, id: u32, pkt: MuPacket) -> Result<(), NetworkError> {
+        let mut map = self.clients.lock().unwrap();
+
+        if let Some(s_ref) = map.get_mut(&id) {
+            s_ref.send(pkt)
+        } else {
+            Err(NetworkError::SessionNotFound)
+        }
+    }
+
     pub fn start_tcp(&mut self, listen_addr: &'a str, port: u16) -> Result<(), NetworkError> {
         let handle = self.handle.clone();
         let addr = match format!("{}:{}", listen_addr, port).parse() {
             Err(_) => return Err(NetworkError::InvalidAddress),
             Ok(addr) => addr,
         };
+
+        println!("Binding TCP on {:?}", addr);
 
         let listener = match TcpListener::bind(&addr, &handle) {
             Err(_) => return Err(NetworkError::TcpBindError),
@@ -142,15 +155,6 @@ impl<'a> Server {
         Ok(())
     }
 
-    pub fn send(&self, id: u32, pkt: MuPacket) -> Result<(), NetworkError> {
-        let mut map = self.clients.lock().unwrap();
-
-        if let Some(s_ref) = map.get_mut(&id) {
-            s_ref.send(pkt)
-        } else {
-            Err(NetworkError::SessionNotFound)
-        }
-    }
 
     #[async]
     fn handle_tcp_connections(
@@ -223,7 +227,9 @@ impl<'a> Server {
         #[async]
         for packet in ssn_reader {
             let task = task_shr_cs.lock().unwrap();
-            if tx.send(NetworkEvent::ClientPacket((s_ref_cj.clone(), packet))).is_ok() {
+            if tx.send(NetworkEvent::ClientPacket((s_ref_cj.clone(), packet)))
+                .is_ok()
+            {
                 if let Some(ref t) = *task {
                     t.notify();
                 }
@@ -241,7 +247,9 @@ impl<'a> Server {
         }
 
         let task = task_shr.lock().unwrap();
-        if tx.send(NetworkEvent::ClientDisconnected(session_id)).is_ok() {
+        if tx.send(NetworkEvent::ClientDisconnected(session_id))
+            .is_ok()
+        {
             if let Some(ref t) = *task {
                 t.notify();
             }

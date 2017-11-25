@@ -5,3 +5,6 @@ members = [
     "lib/network",
     "lib/mu-proto",
 ]
+
+[dependencies]
+clippy = {version = "*", optional = true}
