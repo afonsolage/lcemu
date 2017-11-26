@@ -48,7 +48,7 @@ pub enum NetworkError {
 }
 
 impl From<AddrParseError> for NetworkError {
-    fn from(err: AddrParseError) -> NetworkError {
+    fn from(_err: AddrParseError) -> NetworkError {
         NetworkError::InvalidAddress
     }
 }
@@ -56,19 +56,27 @@ impl From<AddrParseError> for NetworkError {
 #[derive(Debug)]
 pub enum NetworkEvent {
     ClientConnected(SessionRef),
-    ClientPacket((SessionRef, MuPacket)),
     ClientDisconnected(u32),
+    ClientPacket((SessionRef, MuPacket)),
+    ServerConnected(SessionRef),
+    ServerDisconnected(u32),
+    ServerPacket((SessionRef, MuPacket)),
 }
 
 #[derive(Clone, Debug)]
 pub struct SessionRef {
     pub id: u32,
     tx: f_mpsc::Sender<MuPacket>,
+    incoming: bool,
 }
 
 impl SessionRef {
-    pub fn new(id: u32, tx: f_mpsc::Sender<MuPacket>) -> Self {
-        SessionRef { id: id, tx: tx }
+    pub fn new(id: u32, tx: f_mpsc::Sender<MuPacket>, incoming: bool) -> Self {
+        SessionRef {
+            id: id,
+            tx: tx,
+            incoming: incoming,
+        }
     }
 
     pub fn close(&mut self) -> Result<(), NetworkError> {
@@ -122,19 +130,47 @@ impl<'a> Server {
         }
     }
 
-    pub fn start_tcp(&mut self, listen_addr: &'a str, port: u16) -> Result<(), NetworkError> {
+    pub fn connect_to(&mut self, listen_addr: &'a str, port: u16) -> Result<(), Error> {
+        let handle = self.handle.clone();
+        let addr = format!("{}:{}", listen_addr, port).parse()?;
+
+        let tx = self.evt_tx.clone();
+        let task = Arc::clone(&self.task);
+        let clients = Arc::clone(&self.clients);
+        let handle_cj = self.handle.clone();
+
+        let ft = TcpStream::connect(&addr, &handle).then(move |stream_res| {
+            if let Ok(stream) = stream_res {
+                println!("Connected to {:?}", addr);
+                handle_cj.spawn(
+                    Server::handle_stream(stream, tx, task, handle_cj.clone(), clients, false)
+                        .then(|_| Ok(())),
+                );
+            } else {
+                println!("Failed to connect to {:?}", addr);
+            }
+
+            Ok(())
+        });
+
+        handle.spawn(ft);
+
+        Ok(())
+    }
+
+    pub fn start_tcp(&mut self, listen_addr: &'a str, port: u16) -> Result<(), Error> {
         let handle = self.handle.clone();
         let addr = format!("{}:{}", listen_addr, port).parse()?;
 
         println!("Binding TCP on {:?}", addr);
 
         let listener = match TcpListener::bind(&addr, &handle) {
-            Err(_) => return Err(NetworkError::TcpBindError),
+            Err(_) => return Err(NetworkError::TcpBindError)?,
             Ok(r) => r,
         };
 
         handle.spawn(
-            Server::handle_tcp_connections(
+            Server::handle_listener(
                 listener,
                 self.evt_tx.clone(),
                 Arc::clone(&self.task),
@@ -146,9 +182,8 @@ impl<'a> Server {
         Ok(())
     }
 
-
     #[async]
-    fn handle_tcp_connections(
+    fn handle_listener(
         listener: TcpListener,
         tx: Sender<NetworkEvent>,
         task_shr: Arc<Mutex<Option<Task>>>,
@@ -158,47 +193,78 @@ impl<'a> Server {
 
         #[async]
         for (stream, _peer_addr) in listener.incoming() {
-            let id = SESSION_ID_COUNTER.fetch_add(1, Ordering::Relaxed) as u32;
-            let (ssn_reader, ssn_writer) = TcpSession::new_pair(stream, id);
-            let (s_tx, s_rx): (f_mpsc::Sender<MuPacket>, f_mpsc::Receiver<MuPacket>) =
-                f_mpsc::channel(100);
-
-            let s_ref = SessionRef::new(id, s_tx.clone());
-
-            {
-                let mut map = clients.lock().unwrap();
-                map.insert(id, s_ref.clone());
-            }
-
-            if tx.send(NetworkEvent::ClientConnected(s_ref.clone()))
-                .is_ok()
-            {
-                if let Some(ref t) = *task_shr.lock().unwrap() {
-                    t.notify();
-                }
-            } else {
-                println!("Failed to send ClientConnected event.");
-                return Ok(());
-            }
-
-
-
-            let ft = ssn_writer
-                .send_all(s_rx.map_err(|_| TcpSessionError::TcpStreamWrite))
-                .then(|_| Ok(()));
-
-            handle.spawn(ft);
-
             handle.spawn(
-                Server::handle_tcp_session(
-                    ssn_reader,
+                Server::handle_stream(
+                    stream,
                     tx.clone(),
                     Arc::clone(&task_shr),
+                    handle.clone(),
                     Arc::clone(&clients),
-                    s_ref.clone(),
+                    true,
                 ).then(|_| Ok(())),
-            )
+            );
         }
+
+
+        Ok(())
+    }
+
+    #[async]
+    fn handle_stream(
+        stream: TcpStream,
+        tx: Sender<NetworkEvent>,
+        task_shr: Arc<Mutex<Option<Task>>>,
+        handle: Handle,
+        clients: ClientsMap,
+        incoming: bool,
+    ) -> Result<(), Error> {
+
+        let id = SESSION_ID_COUNTER.fetch_add(1, Ordering::Relaxed) as u32;
+        let (ssn_reader, ssn_writer) = TcpSession::new_pair(stream, id);
+        let (s_tx, s_rx): (f_mpsc::Sender<MuPacket>, f_mpsc::Receiver<MuPacket>) =
+            f_mpsc::channel(100);
+
+        let s_ref = SessionRef::new(id, s_tx.clone(), incoming);
+
+        {
+            let mut map = clients.lock().unwrap();
+            map.insert(id, s_ref.clone());
+        }
+
+        let evt = if s_ref.incoming {
+            NetworkEvent::ClientConnected(s_ref.clone())
+        } else {
+            NetworkEvent::ServerConnected(s_ref.clone())
+        };
+
+        if tx.send(evt)
+            .is_ok()
+        {
+            if let Some(ref t) = *task_shr.lock().unwrap() {
+                t.notify();
+            }
+        } else {
+            println!("Failed to send Connected event.");
+            return Ok(());
+        }
+
+
+
+        let ft = ssn_writer
+            .send_all(s_rx.map_err(|_| TcpSessionError::TcpStreamWrite))
+            .then(|_| Ok(()));
+
+        handle.spawn(ft);
+
+        handle.spawn(
+            Server::handle_tcp_session(
+                ssn_reader,
+                tx.clone(),
+                Arc::clone(&task_shr),
+                Arc::clone(&clients),
+                s_ref.clone(),
+            ).then(|_| Ok(())),
+        );
 
         Ok(())
     }
@@ -218,14 +284,19 @@ impl<'a> Server {
         #[async]
         for packet in ssn_reader {
             let task = task_shr_cs.lock().unwrap();
-            if tx.send(NetworkEvent::ClientPacket((s_ref_cj.clone(), packet)))
-                .is_ok()
-            {
+
+            let evt = if s_ref.incoming {
+                NetworkEvent::ClientPacket((s_ref_cj.clone(), packet))
+            } else {
+                NetworkEvent::ServerPacket((s_ref_cj.clone(), packet))
+            };
+
+            if tx.send(evt).is_ok() {
                 if let Some(ref t) = *task {
                     t.notify();
                 }
             } else {
-                println!("Failed to send ClientDisconnected event.");
+                println!("Failed to send Packet event.");
                 return Ok(());
             }
         }
@@ -238,14 +309,19 @@ impl<'a> Server {
         }
 
         let task = task_shr.lock().unwrap();
-        if tx.send(NetworkEvent::ClientDisconnected(session_id))
-            .is_ok()
-        {
+
+        let evt = if s_ref.incoming {
+            NetworkEvent::ClientDisconnected(session_id)
+        } else {
+            NetworkEvent::ServerDisconnected(session_id)
+        };
+
+        if tx.send(evt).is_ok() {
             if let Some(ref t) = *task {
                 t.notify();
             }
         } else {
-            println!("Failed to send ClientDisconnected event.");
+            println!("Failed to send Disconnected event.");
             return Ok(());
         }
 

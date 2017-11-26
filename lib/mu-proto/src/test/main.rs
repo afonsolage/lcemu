@@ -16,6 +16,8 @@ fn main() {
     let mut svr = Server::new(reactor.handle());
     svr.start_tcp("0.0.0.0", 44405).ok();
 
+    svr.connect_to("127.0.0.1", 44405).ok();
+
     let svr_ft = svr.for_each(|evt| {
         println!("Received: {:?}", evt);
 
