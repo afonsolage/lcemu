@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::convert::From;
 use std::collections::HashMap;
 use std::net::AddrParseError;
+use std::hash::{Hash, Hasher};
 
 use super::tcp_session::{TcpSessionError, TcpSession, TcpSessionReader};
 use super::packet::MuPacket;
@@ -96,6 +97,19 @@ impl SessionRef {
         }
     }
 }
+
+impl Hash for SessionRef {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for SessionRef {
+    fn eq(&self, other: &SessionRef) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for SessionRef {}
 
 type ClientsMap = Arc<Mutex<HashMap<u32, SessionRef>>>;
 
@@ -237,9 +251,7 @@ impl<'a> Server {
             NetworkEvent::ServerConnected(s_ref.clone())
         };
 
-        if tx.send(evt)
-            .is_ok()
-        {
+        if tx.send(evt).is_ok() {
             if let Some(ref t) = *task_shr.lock().unwrap() {
                 t.notify();
             }

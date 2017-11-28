@@ -13,6 +13,7 @@ mod server;
 mod protocol;
 mod packet;
 mod tcp_session;
+pub mod prelude;
 
 pub use server::{Server, NetworkError, NetworkEvent};
 pub use protocol::*;

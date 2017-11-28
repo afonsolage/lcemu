@@ -1,9 +1,5 @@
 [network]
-listen_tcp_port = 44405
-listen_tcp_addr = "0.0.0.0"
-listen_udp_port = 55557
-listen_udp_addr = "0.0.0.0"
-
-[gs-1]
-addr = "127.0.0.1"
-port = 55590
+external_port = 44405
+external_addr = "0.0.0.0"
+internal_port = 55557
+internal_addr = "0.0.0.0"

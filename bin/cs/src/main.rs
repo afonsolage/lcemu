@@ -1,7 +1,13 @@
 extern crate config;
-extern crate network;
+extern crate mu_proto;
+extern crate tokio_core;
+extern crate futures;
+extern crate failure;
 
-use network::Server;
+use futures::stream::Stream;
+use tokio_core::reactor::{Core, Handle};
+use mu_proto::prelude::*;
+
 mod logic;
 
 fn main() {
@@ -12,44 +18,50 @@ fn main() {
         .merge(config::File::with_name("config/cs.toml"))
         .expect("Failed to load config file.");
 
-    let server = setup_networking(&settings);
+    let mut reactor = Core::new().unwrap();
+    let svr = setup_networking(&settings, reactor.handle());
 
     let mut handler = logic::Handler::new();
-    handler.setup(&settings);
-    handler.start(server);
+    let svr_ft = svr.for_each(|evt| {
+        println!("Received: {:?}", evt);
+        handler.handle_net_event(evt);
+        Ok(())
+    });
+
+    reactor.run(svr_ft).unwrap();
 }
 
-fn setup_networking(settings: &config::Config) -> Server {
-    let mut server = Server::new();
+fn setup_networking(settings: &config::Config, handle: Handle) -> Server {
+    let mut server = Server::new(handle);
 
-    //Setup TCP Server
+    //Setup external TCP Server
     {
-        let listen_tcp_addr = match settings.get_str("network.listen_tcp_addr") {
+        let external_addr = match settings.get_str("network.external_addr") {
             Ok(addr) => addr,
             Err(_) => format!("0.0.0.0"),
         };
 
-        let listen_tcp_port = match settings.get_int("network.listen_tcp_port") {
+        let external_port = match settings.get_int("network.external_port") {
             Ok(port) => port,
             Err(_) => 44405,
         };
 
-        server.start_tcp(&listen_tcp_addr, listen_tcp_port as u16);
+        server.start_tcp(&external_addr, external_port as u16).ok();
     }
 
-    //Setup UDP Clients
+    //Setup internal TCP Server
     {
-        let listen_udp_addr = match settings.get_str("network.listen_udp_addr") {
+        let internal_addr = match settings.get_str("network.internal_addr") {
             Ok(addr) => addr,
             Err(_) => format!("0.0.0.0"),
         };
 
-        let listen_udp_port = match settings.get_int("network.listen_udp_port") {
+        let internal_port = match settings.get_int("network.internal_port") {
             Ok(port) => port,
             Err(_) => 55557,
         };
 
-        server.start_udp(&listen_udp_addr, listen_udp_port as u16);
+        server.start_tcp(&internal_addr, internal_port as u16).ok();
     }
 
     server

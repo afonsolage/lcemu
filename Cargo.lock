@@ -217,8 +217,13 @@ name = "lccs"
 version = "0.1.0"
 dependencies = [
  "config 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "network 0.1.0",
+ "failure 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure_derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures 0.1.17 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mu-proto 0.1.0",
  "scheduled-executor 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-core 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-io 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

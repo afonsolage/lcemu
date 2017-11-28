@@ -1,8 +1,7 @@
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::collections::{HashMap, HashSet};
-use std::time::{Instant, Duration};
-use config;
-use network::prelude::*;
+use std::collections::HashMap;
+use mu_proto::prelude::*;
+
+use failure::Error;
 
 struct GSInstance {
     pub svr_code: u16,
@@ -11,14 +10,7 @@ struct GSInstance {
     pub perc: u8,
     pub usr_cnt: u16,
     pub acc_cnt: u16,
-    pub pcbng_cnt: u16,
     pub mx_usr_cnt: u16,
-    pub last_info: Instant,
-}
-
-enum LogicEvent {
-    CheckInstanceTimeout,
-    NetEvent(Event),
 }
 
 impl GSInstance {
@@ -28,209 +20,108 @@ impl GSInstance {
             _ => (self.usr_cnt / self.mx_usr_cnt) as u8,
         }
     }
-
-    pub fn alive(&self) -> bool {
-        self.last_info.elapsed().as_secs() < 10
-    }
 }
 
 pub struct Handler {
     gs_map: HashMap<u16, GSInstance>,
-    clients: HashSet<u32>,
-    tx: Sender<LogicEvent>,
-    rx: Receiver<LogicEvent>,
+    clients: HashMap<u32, SessionRef>,
 }
 
 impl Handler {
     pub fn new() -> Handler {
-        let (tx, rx): (Sender<LogicEvent>, Receiver<LogicEvent>) = channel();
         Handler {
             gs_map: HashMap::new(),
-            clients: HashSet::new(),
-            rx: rx,
-            tx: tx,
+            clients: HashMap::new(),
         }
     }
 
-    pub fn setup(&mut self, settings: &config::Config) {
-        let map = settings
-            .clone()
-            .try_into::<HashMap<String, HashMap<String, String>>>()
-            .unwrap();
-
-        for (key, val) in map.iter() {
-            if !key.starts_with("gs-") {
-                continue;
-            }
-
-            if !val.contains_key("addr") {
-                panic!(
-                    "Failed to parse config. Section {} doesnt have addr config.",
-                    key
-                );
-            }
-
-            if !val.contains_key("port") {
-                panic!(
-                    "Failed to parse config. Section {} doesnt have port config.",
-                    key
-                );
-            }
-
-            let code = key.split("-").collect::<Vec<_>>();
-
-            if code.len() != 2 {
-                panic!("Failed to parse config, invalid section name: {}", key);
-            }
-
-            let code = code[1];
-            let code = match code.parse::<u16>() {
-                Err(_) => panic!("Failed to parse config, invalid section name: {}", key),
-                Ok(r) => r,
-            };
-
-            let addr = match val.get("addr") {
-                None => panic!(
-                    "Failed to parse config. Section {} doesnt have addr config.",
-                    key
-                ),
-                Some(str_addr) => {
-                    if str_addr.len() >= 16 {
-                        panic!("Invalid addr on section: {}", key);
-                    }
-
-                    let mut addr = [0u8; 16];
-                    addr[..str_addr.len()].copy_from_slice(&str_addr.as_bytes());
-                    addr
-                }
-            };
-
-            let port = match val.get("port") {
-                None => panic!(
-                    "Failed to parse config. Section {} doesnt have port config.",
-                    key
-                ),
-                Some(r) => match r.parse::<u16>() {
-                    Err(_) => panic!("Failed to parse config, invalid port on section: {}", key),
-                    Ok(r) => r,
-                },
-            };
-
-            let gs = GSInstance {
-                svr_code: code,
-                ip: addr,
-                port: port,
-                perc: 0,
-                usr_cnt: 0,
-                acc_cnt: 0,
-                pcbng_cnt: 0,
-                mx_usr_cnt: 0,
-                last_info: Instant::now() - Duration::new(10, 0), //Creates a instance 10 seconds ago, which is the timeout of keep alive, so the instance is inited as "dead"
-            };
-
-            self.gs_map.insert(gs.svr_code, gs);
-        }
-
-        if self.gs_map.len() == 0 {
-            panic!("No GS settings found on config file. Please add at least one.");
-        } else {
-            println!("Loaded {} gs config(s).", self.gs_map.len());
-        }
-    }
-
-    pub fn start(&self, svr: Server) {
-
-    }
-
-    pub fn handle_net_event(&mut self, evt: Event, svr: &Server) {
+    pub fn handle_net_event(&mut self, evt: NetworkEvent) {
         match evt {
-            Event::ClientConnected(id) => self.on_client_connected(id, svr),
-            Event::ClientDisconnected(id) => self.on_client_disconnected(id, svr),
-            Event::ClientPacket(pkt) => self.on_packet_received(pkt, svr),
+            NetworkEvent::ClientConnected(session) => self.on_client_connected(session),
+            NetworkEvent::ClientDisconnected(id) => self.on_client_disconnected(id),
+            NetworkEvent::ClientPacket((session, pkt)) => self.on_packet_received(session, pkt),
+            _ => println!("Unkown event: {:?}", evt),
         };
     }
 
-    fn broadcast(&self, pkt: Packet, svr: &Server) -> Vec<u32> {
-        let mut errs: Vec<u32> = vec![];
-        for &id in self.clients.iter() {
-            match svr.post_packet(id, pkt.clone()) {
-                Err(_) => errs.push(id),
-                Ok(_) => (),
-            };
+    fn broadcast(&mut self, pkt: MuPacket) {
+        for (_, session) in &mut self.clients {
+            if session.send(pkt.clone()).is_err() {
+                session.close().ok();
+            }
         }
-
-        errs
     }
 
-    fn on_client_connected(&mut self, id: u32, svr: &Server) {
+    fn on_client_connected(&mut self, mut session: SessionRef) {
         let res = ConnectResult { res: 1 };
 
-        match svr.post_packet(id, res.to_packet()) {
-            Err(_) => svr.disconnect(id),
-            _ => match self.send_server_list(id, svr) {
-                Err(_) => svr.disconnect(id),
-                _ => Ok(()),
-            },
-        }.ok();
+        if session.send(res.to_packet()).is_err() {
+            session.close().ok();
+            return;
+        }
 
-        self.clients.insert(id);
+        if self.send_server_list(&mut session).is_err() {
+            session.close().ok();
+            return;
+        }
+
+        self.clients.insert(session.id, session);
     }
 
-    fn on_client_disconnected(&mut self, id: u32, _: &Server) {
+    fn on_client_disconnected(&mut self, id: u32) {
         println!("Client disconnected {}", id);
         self.clients.remove(&id);
     }
 
-    fn on_packet_received(&mut self, pkt: Packet, svr: &Server) {
+    fn on_packet_received(&mut self, session: SessionRef, pkt: MuPacket) {
         match pkt.code {
-            0x01 => self.on_server_info(ServerInfo::parse(&pkt.data), svr),
+            0x01 => self.on_server_info(ServerInfo::parse(&pkt.data), session),
             0x02 => (), //JoinServerStat
             _ => println!("Unhandled packet: {}", pkt),
         };
     }
 
-    fn on_server_info(&mut self, msg: ServerInfo, svr: &Server) {
+    fn on_server_info(&mut self, msg: ServerInfo, _session: SessionRef) {
         let code = msg.svr_code;
 
-        {
-            let info = match self.gs_map.get_mut(&code) {
-                None => {
-                    println!(
-                        "Received info from gs {}, but there is config for it!.",
-                        code
-                    );
-                    return;
-                }
-                Some(r) => r,
-            };
+        let mut opt = None;
 
-            info.perc = msg.perc;
-            info.usr_cnt = msg.usr_cnt;
-            info.acc_cnt = msg.acc_cnt;
-            info.pcbng_cnt = msg.pcbng_cnt;
-            info.mx_usr_cnt = msg.mx_usr_cnt;
-            info.last_info = Instant::now();
+        match self.gs_map.get_mut(&code) {
+            None => {
+                let info = GSInstance {
+                    svr_code: code,
+                    ip: msg.ip,
+                    port: msg.port,
+                    perc: msg.perc,
+                    usr_cnt: msg.usr_cnt,
+                    acc_cnt: msg.acc_cnt,
+                    mx_usr_cnt: msg.mx_usr_cnt,
+                };
+                opt = Some(info);
+            }
+            Some(info) => {
+                info.perc = msg.perc;
+                info.usr_cnt = msg.usr_cnt;
+                info.acc_cnt = msg.acc_cnt;
+            }
+        };
+
+        if let Some(info) = opt {
+            self.gs_map.insert(code, info);
         }
 
-        match self.new_server_list_pkt() {
-            None => (),
-            Some(pkt) => {
-                for id in self.broadcast(pkt, svr) {
-                    svr.disconnect(id).ok();
-                }
-            }
+        if let Some(pkt) = self.new_server_list_pkt() {
+            self.broadcast(pkt);
         }
     }
 
-    fn new_server_list_pkt(&self) -> Option<Packet> {
+    fn new_server_list_pkt(&self) -> Option<MuPacket> {
         let mut list = ServerList::new(self.gs_map.len() as u16);
 
         let mut cnt = 0;
         for (_, info) in self.gs_map.iter() {
-            if info.alive() {
-                list.add(info.svr_code, info.load());
-                cnt += 1;
-            }
+            list.add(info.svr_code, info.load());
+            cnt += 1;
         }
 
         list.cnt = cnt;
@@ -238,10 +129,11 @@ impl Handler {
         Some(list.to_packet())
     }
 
-    fn send_server_list(&mut self, id: u32, svr: &Server) -> Result<(), Error> {
-        match self.new_server_list_pkt() {
-            None => Ok(()),
-            Some(pkt) => svr.post_packet(id, pkt),
+    fn send_server_list(&mut self, session: &mut SessionRef) -> Result<(), Error> {
+        if let Some(pkt) = self.new_server_list_pkt() {
+            session.send(pkt)?
         }
+
+        Ok(())
     }
 }
