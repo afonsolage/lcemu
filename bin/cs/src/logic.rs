@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use mu_proto::prelude::*;
-
 use failure::Error;
+use futures::{Future, Poll, Async, Stream};
 
 struct GSInstance {
     pub svr_code: u16,
@@ -22,16 +22,21 @@ impl GSInstance {
     }
 }
 
-pub struct Handler {
+pub struct Handler<T: Stream> {
     gs_map: HashMap<u16, GSInstance>,
     clients: HashMap<u32, SessionRef>,
+    io: T,
 }
 
-impl Handler {
-    pub fn new() -> Handler {
+impl<T> Handler<T>
+where
+    T: Stream<Item = NetworkEvent, Error = Error>,
+{
+    pub fn new(t: T) -> Handler<T> {
         Handler {
             gs_map: HashMap::new(),
             clients: HashMap::new(),
+            io: t,
         }
     }
 
@@ -135,5 +140,27 @@ impl Handler {
         }
 
         Ok(())
+    }
+
+    fn process(&mut self, evt: NetworkEvent) -> Poll<(), Error> {
+        Ok(Async::Ready(()))
+    }
+}
+
+impl<T> Future for Handler<T>
+where
+    T: Stream<Item = NetworkEvent, Error = Error>,
+{
+    type Item = ();
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            match self.io.poll()? {
+                Async::Ready(Some(evt)) => try_ready!(self.process(evt)),
+                Async::Ready(None) => break Ok(Async::Ready(())),
+                Async::NotReady => break Ok(Async::NotReady),
+            }
+        }
     }
 }

@@ -1,8 +1,12 @@
 extern crate config;
 extern crate mu_proto;
 extern crate tokio_core;
+
+#[macro_use]
 extern crate futures;
+
 extern crate failure;
+#[macro_use] extern crate failure_derive;
 
 use futures::stream::Stream;
 use tokio_core::reactor::{Core, Handle};
@@ -21,14 +25,7 @@ fn main() {
     let mut reactor = Core::new().unwrap();
     let svr = setup_networking(&settings, reactor.handle());
 
-    let mut handler = logic::Handler::new();
-    let svr_ft = svr.for_each(|evt| {
-        println!("Received: {:?}", evt);
-        handler.handle_net_event(evt);
-        Ok(())
-    });
-
-    reactor.run(svr_ft).unwrap();
+    reactor.run(logic::Handler::new(svr)).unwrap();
 }
 
 fn setup_networking(settings: &config::Config, handle: Handle) -> Server {
