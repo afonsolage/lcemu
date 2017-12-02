@@ -6,4 +6,9 @@ authors = ["Afonso Lage <lage.afonso@gmail.com>"]
 [dependencies]
 scheduled-executor = "*"
 config = "*"
-network = { path = "../../lib/network" }
+futures = "*"
+tokio-io = "*"
+tokio-core = "*"
+failure = "*"
+failure_derive = "*"
+mu-proto = { path = "../../lib/mu-proto" }

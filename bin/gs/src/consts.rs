@@ -1,2 +1,2 @@
 
-pub const CS_SERVER: u32 = 1;
+// pub const CS_SERVER: u32 = 1;

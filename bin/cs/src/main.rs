@@ -1,14 +1,12 @@
-extern crate config;
 extern crate mu_proto;
+extern crate config;
 extern crate tokio_core;
 
 #[macro_use]
 extern crate futures;
 
 extern crate failure;
-#[macro_use] extern crate failure_derive;
 
-use futures::stream::Stream;
 use tokio_core::reactor::{Core, Handle};
 use mu_proto::prelude::*;
 

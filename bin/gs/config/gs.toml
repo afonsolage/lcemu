@@ -3,8 +3,8 @@ server_code = 1
 max_user = 100
 
 [network]
-listen_tcp_port = 55590
-listen_tcp_addr = "0.0.0.0"
+listen_port = 55590
+listen_addr = "0.0.0.0"
 cs_addr = "127.0.0.1"
 cs_port = 55557
 

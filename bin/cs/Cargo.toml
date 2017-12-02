@@ -9,12 +9,6 @@ config = "*"
 futures = "*"
 tokio-io = "*"
 tokio-core = "*"
-#tokio-proto = "*"
-#tokio-service = "*"
-#bytes = "*"
-#futures-await = "*"
 failure = "*"
 failure_derive = "*"
-
 mu-proto = { path = "../../lib/mu-proto" }
-# network = { path = "../../lib/network" }

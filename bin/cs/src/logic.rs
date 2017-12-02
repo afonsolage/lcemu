@@ -143,6 +143,7 @@ where
     }
 
     fn process(&mut self, evt: NetworkEvent) -> Poll<(), Error> {
+        self.handle_net_event(evt);
         Ok(Async::Ready(()))
     }
 }
