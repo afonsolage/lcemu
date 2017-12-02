@@ -173,18 +173,6 @@ impl<'a> Server {
     }
 
     #[async]
-    fn reconnect_to(
-        tx: Sender<NetworkEvent>,
-        addr: SocketAddr,
-        kind: u8,
-        handle: Handle,
-        clients: ClientsMap,
-        task: Arc<Mutex<Option<Task>>>,
-    ) -> Result<(), Error> {
-        await!(Server::try_connect(tx, kind, handle, clients, addr, task))
-    }
-
-    #[async]
     fn try_connect(
         tx: Sender<NetworkEvent>,
         kind: u8,
@@ -195,7 +183,7 @@ impl<'a> Server {
     ) -> Result<(), Error> {
         loop {
             if let Ok(stream) = await!(TcpStream::connect(&addr, &handle)) {
-                return await!(Server::handle_stream(
+                break await!(Server::handle_stream(
                     stream,
                     kind,
                     tx,
@@ -306,19 +294,15 @@ impl<'a> Server {
 
         handle.spawn(ft);
 
-        handle.spawn(
-            Server::handle_tcp_session(
-                ssn_reader,
-                tx.clone(),
-                Arc::clone(&task_shr),
-                Arc::clone(&clients),
-                s_ref.clone(),
-                reconnect,
-                handle.clone(),
-            ).then(|_| Ok(())),
-        );
-
-        Ok(())
+        await!(Server::handle_tcp_session(
+            ssn_reader,
+            tx.clone(),
+            Arc::clone(&task_shr),
+            Arc::clone(&clients),
+            s_ref.clone(),
+            reconnect,
+            handle.clone(),
+        ))
     }
 
     #[async]
@@ -369,14 +353,10 @@ impl<'a> Server {
         }
 
         if reconnect {
-            await!(Server::reconnect_to(
-                tx,
-                s_ref.addr,
-                s_ref.kind,
-                handle,
-                clients,
-                task_shr,
-            ))?;
+            let handle_cj = handle.clone();
+            let ft = Server::try_connect(tx, s_ref.kind, handle_cj, clients, s_ref.addr, task_shr)
+                .then(|_| Ok(()));
+            handle.spawn(ft);
         }
 
         Ok(())
