@@ -48,7 +48,7 @@ fn setup_networking(settings: &config::Config, handle: Handle) -> Server {
             Err(_) => 55590,
         };
 
-        server.start_tcp(&listen_addr, listen_port as u16).ok();
+        server.start_tcp(&listen_addr, listen_port as u16, consts::CLIENT_CONN).ok();
     }
 
     {
@@ -62,7 +62,7 @@ fn setup_networking(settings: &config::Config, handle: Handle) -> Server {
             Err(_) => 55557,
         };
 
-        server.connect_to(&addr, port as u16).ok();
+        server.connect_to(&addr, port as u16, consts::CS_CONN).ok();
     }
 
     server

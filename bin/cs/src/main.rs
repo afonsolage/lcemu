@@ -11,6 +11,7 @@ use tokio_core::reactor::{Core, Handle};
 use mu_proto::prelude::*;
 
 mod logic;
+mod consts;
 
 fn main() {
     println!("Starting Connect Server...");
@@ -41,7 +42,7 @@ fn setup_networking(settings: &config::Config, handle: Handle) -> Server {
             Err(_) => 44405,
         };
 
-        server.start_tcp(&external_addr, external_port as u16).ok();
+        server.start_tcp(&external_addr, external_port as u16, consts::CLIENT_CONN).ok();
     }
 
     //Setup internal TCP Server
@@ -56,7 +57,7 @@ fn setup_networking(settings: &config::Config, handle: Handle) -> Server {
             Err(_) => 55557,
         };
 
-        server.start_tcp(&internal_addr, internal_port as u16).ok();
+        server.start_tcp(&internal_addr, internal_port as u16, consts::GS_CONN).ok();
     }
 
     server

@@ -2,7 +2,6 @@
 members = [
     "bin/gs",
     "bin/cs",
-    "lib/network",
     "lib/mu-proto",
 ]
 

@@ -14,32 +14,27 @@ where
         Handler { io: t }
     }
 
-    pub fn handle_net_event(&self, evt: NetworkEvent) {
+    pub fn handle_net_event(&self, evt: NetworkEvent) -> Poll<(), Error> {
         match evt {
-            NetworkEvent::ClientConnected(session) => self.on_client_connected(session),
-            NetworkEvent::ClientDisconnected(id) => self.on_client_disconnected(id),
-            NetworkEvent::ClientPacket((session, pkt)) => self.on_packet_received(session, pkt),
-            _ => println!("Unkown event: {:?}", evt),
+            NetworkEvent::ClientConnected(session) => self.on_connected(session),
+            NetworkEvent::ClientDisconnected((id, kind)) => self.on_disconnected(id, kind),
+            NetworkEvent::ClientPacket((session, pkt)) => self.on_received(session, pkt),
         };
+        Ok(Async::Ready(()))
     }
 
-    fn on_client_connected(&self, mut session: SessionRef) {
+    fn on_connected(&self, mut session: SessionRef) {
         println!("Client connected {}", session.id)
     }
 
-    fn on_client_disconnected(&self, id: u32) {
+    fn on_disconnected(&self, id: u32, kind: u8) {
         println!("Client disconnected {}", id)
     }
 
-    fn on_packet_received(&self, session: SessionRef, pkt: MuPacket) {
+    fn on_received(&self, session: SessionRef, pkt: MuPacket) {
         match pkt.code {
             _ => println!("Unhandled packet: {}", pkt),
         };
-    }
-
-    fn process(&mut self, evt: NetworkEvent) -> Poll<(), Error> {
-        self.handle_net_event(evt);
-        Ok(Async::Ready(()))
     }
 }
 
@@ -53,7 +48,7 @@ where
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             match self.io.poll()? {
-                Async::Ready(Some(evt)) => try_ready!(self.process(evt)),
+                Async::Ready(Some(evt)) => try_ready!(self.handle_net_event(evt)),
                 Async::Ready(None) => break Ok(Async::Ready(())),
                 Async::NotReady => break Ok(Async::NotReady),
             }
